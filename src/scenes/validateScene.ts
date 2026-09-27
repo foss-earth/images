@@ -13,6 +13,7 @@ import {
   type HeightRecord,
   type LinkRecord,
   type OverviewRecord,
+  type ResolvedMarkerStyle,
   type ResolvedAsset,
   type ResolvedPanorama,
   type ResolvedRepresentation,
@@ -46,6 +47,11 @@ const ID = /^[A-Za-z0-9._-]+$/;
 /** An extension key names its owner: `owner.name`, lower-case owner. */
 const EXTENSION_KEY = /^[a-z0-9-]+(\.[A-Za-z0-9_-]+)+$/;
 const MIME_TYPES = ["image/jpeg", "image/png"] as const;
+/** A CSS hex colour with or without alpha: `#rrggbb` or `#rrggbbaa`. */
+const HEX_COLOUR = /^#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/;
+/** The format's bounds on an outline's width, CSS px, and on hover growth. */
+const OUTLINE_WIDTH_PX = { min: 0, max: 32 };
+const HOVER_SCALE = { min: 1, max: 4 };
 
 type Json = Record<string, unknown>;
 
@@ -317,7 +323,47 @@ function checkLink(checker: Checker, value: unknown, path: string): LinkRecord |
   return { id, target, label, ...(direction ? { direction } : {}), ...(arrivalView ? { arrivalView } : {}), ...(Object.keys(extensions).length ? { extensions } : {}) };
 }
 
-function checkPanorama(checker: Checker, record: Json, path: string): ResolvedPanorama | null {
+/** A style's own properties: undefined inherits the scene's, null turns it off. */
+type StyleOverrides = { outline?: ResolvedMarkerStyle["outline"]; hover?: number | null };
+
+function checkMarkerStyle(checker: Checker, value: unknown, path: string): StyleOverrides {
+  const record = checker.record(value, path);
+  if (!record) return {};
+  checker.keys(record, path, ["outline", "hover"]);
+  const style: StyleOverrides = {};
+  if (record.outline === null) style.outline = null;
+  else if (record.outline !== undefined) {
+    const outline = checker.record(record.outline, `${path}.outline`);
+    if (outline) {
+      checker.keys(outline, `${path}.outline`, ["color", "widthPx"]);
+      const text = outline.color;
+      if (typeof text !== "string" || !HEX_COLOUR.test(text)) checker.fail(`${path}.outline.color`, "must be a hex colour, #rrggbb or #rrggbbaa");
+      const widthPx = checker.within(outline.widthPx, `${path}.outline.widthPx`, OUTLINE_WIDTH_PX.min, OUTLINE_WIDTH_PX.max, true, true);
+      if (typeof text === "string" && HEX_COLOUR.test(text) && widthPx !== null) {
+        const channel = (index: number): number => parseInt(text.slice(1 + 2 * index, 3 + 2 * index), 16) / 255;
+        style.outline = { color: [channel(0), channel(1), channel(2), text.length > 7 ? channel(3) : 1], widthPx };
+      }
+    }
+  }
+  if (record.hover === null) style.hover = null;
+  else if (record.hover !== undefined) {
+    const hover = checker.record(record.hover, `${path}.hover`);
+    if (hover) {
+      checker.keys(hover, `${path}.hover`, ["scale"]);
+      const scale = checker.within(hover.scale, `${path}.hover.scale`, HOVER_SCALE.min, HOVER_SCALE.max, true, true);
+      if (scale !== null) style.hover = scale;
+    }
+  }
+  return style;
+}
+
+function resolveMarkerStyle(scene: StyleOverrides, own: StyleOverrides): ResolvedMarkerStyle {
+  const outline = own.outline !== undefined ? own.outline : scene.outline ?? null;
+  const hover = own.hover !== undefined ? own.hover : scene.hover ?? null;
+  return { outline: outline && outline.widthPx > 0 && outline.color[3] > 0 ? outline : null, hoverScale: hover ?? 1 };
+}
+
+function checkPanorama(checker: Checker, record: Json, path: string, sceneStyle: StyleOverrides): ResolvedPanorama | null {
   checker.keys(record, path, ["id", "type", "assetId", "title", "description", "capture", "imagePose", "marker", "initialView", "links", "required", "extensions"]);
   const id = checker.id(record.id, `${path}.id`);
   const assetId = checker.id(record.assetId, `${path}.assetId`);
@@ -348,7 +394,7 @@ function checkPanorama(checker: Checker, record: Json, path: string): ResolvedPa
   const markerRecord = checker.record(record.marker, `${path}.marker`);
   let marker: ResolvedPanorama["marker"] | null = null;
   if (markerRecord) {
-    checker.keys(markerRecord, `${path}.marker`, ["mode", "eastM", "northM", "offsetM", "radiusMeters"]);
+    checker.keys(markerRecord, `${path}.marker`, ["mode", "eastM", "northM", "offsetM", "radiusMeters", "style"]);
     const mode = checker.oneOf(markerRecord.mode, `${path}.marker.mode`, ["ground-relative", "capture-relative"] as const);
     const eastM = checker.finite(markerRecord.eastM, `${path}.marker.eastM`);
     const northM = checker.finite(markerRecord.northM, `${path}.marker.northM`);
@@ -364,6 +410,7 @@ function checkPanorama(checker: Checker, record: Json, path: string): ResolvedPa
     }
     if (mode && eastM !== null && northM !== null && offsetM !== null) marker = { mode, eastM, northM, offsetM, ...(radiusMeters ? { radiusMeters } : {}) };
   }
+  const ownStyle = markerRecord?.style === undefined ? {} : checkMarkerStyle(checker, markerRecord.style, `${path}.marker.style`);
 
   const initialView = record.initialView === undefined ? undefined : checkView(checker, record.initialView, `${path}.initialView`) ?? undefined;
   const links: LinkRecord[] = [];
@@ -381,7 +428,7 @@ function checkPanorama(checker: Checker, record: Json, path: string): ResolvedPa
   if (!id || !assetId || !title || !capture || !imagePose || !marker) return null;
   return {
     id, type: "panorama", assetId, title, ...(description ? { description } : {}), capture, imagePose, marker,
-    ...(initialView ? { initialView } : {}), links, ...(record.required === true ? { required: true } : {}),
+    ...(initialView ? { initialView } : {}), links, markerStyle: resolveMarkerStyle(sceneStyle, ownStyle), ...(record.required === true ? { required: true } : {}),
     ...(Object.keys(extensions).length ? { extensions } : {}),
   };
 }
@@ -456,7 +503,8 @@ export function validateScene(input: unknown, options: ValidateSceneOptions = {}
     try { base = new URL(String(options.baseUrl)); } catch { checker.fail("$", `the base URL ${String(options.baseUrl)} is not a URL`); }
   }
 
-  checker.keys(root, "$", ["format", "version", "id", "revision", "title", "requiredExtensions", "extensions", "assets", "entities", "groups", "initialPanorama", "overview"]);
+  checker.keys(root, "$", ["format", "version", "id", "revision", "title", "requiredExtensions", "extensions", "assets", "entities", "groups", "initialPanorama", "overview", "markerStyle"]);
+  const sceneStyle = root.markerStyle === undefined ? {} : checkMarkerStyle(checker, root.markerStyle, "$.markerStyle");
   const id = checker.id(root.id, "$.id");
   const revision = checker.text(root.revision, "$.revision");
   const title = checker.text(root.title, "$.title");
@@ -503,7 +551,7 @@ export function validateScene(input: unknown, options: ValidateSceneOptions = {}
       }
       return;
     }
-    const panorama = checkPanorama(checker, record, path);
+    const panorama = checkPanorama(checker, record, path, sceneStyle);
     if (!panorama) return;
     if (!assets.has(panorama.assetId)) {
       if (unsupportedAssets.has(panorama.assetId)) {
