@@ -384,11 +384,13 @@ function checkPanorama(checker: Checker, record: Json, path: string, sceneStyle:
   const poseRecord = checker.record(record.imagePose, `${path}.imagePose`);
   let imagePose: ResolvedPanorama["imagePose"] | null = null;
   if (poseRecord) {
-    checker.keys(poseRecord, `${path}.imagePose`, ["headingDeg", "pitchDeg", "rollDeg"]);
+    checker.keys(poseRecord, `${path}.imagePose`, ["headingDeg", "pitchDeg", "rollDeg", "aligned"]);
     const headingDeg = checker.within(poseRecord.headingDeg, `${path}.imagePose.headingDeg`, 0, 360, true, false);
     const pitchDeg = checker.within(poseRecord.pitchDeg, `${path}.imagePose.pitchDeg`, -90, 90, true, true);
     const rollDeg = checker.within(poseRecord.rollDeg, `${path}.imagePose.rollDeg`, -180, 180, false, true);
-    if (headingDeg !== null && pitchDeg !== null && rollDeg !== null) imagePose = { headingDeg, pitchDeg, rollDeg };
+    const aligned = poseRecord.aligned;
+    if (aligned !== undefined && typeof aligned !== "boolean") checker.fail(`${path}.imagePose.aligned`, "must be true or false");
+    if (headingDeg !== null && pitchDeg !== null && rollDeg !== null) imagePose = { headingDeg, pitchDeg, rollDeg, ...(typeof aligned === "boolean" ? { aligned } : {}) };
   }
 
   const markerRecord = checker.record(record.marker, `${path}.marker`);

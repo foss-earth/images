@@ -47,6 +47,11 @@ export function representationFaceTexels(representation: ResolvedRepresentation)
   return representation.projection === "cube" ? representation.faceSize : representation.width / 4;
 }
 
+/** Pixels around the whole turn: an equirectangular image's width, or four cube faces. */
+export function representationAroundPx(representation: ResolvedRepresentation): number {
+  return 4 * representationFaceTexels(representation);
+}
+
 // ─── Pools ──────────────────────────────────────────────────────────────
 
 export type PoolName = "sourceGpu" | "decoded" | "encoded" | "uploadOutstanding";
@@ -198,6 +203,8 @@ export interface RepresentationChoice {
   representation: ResolvedRepresentation;
   /** Why it is not the one the requested density asked for, or null when it is. */
   limitation: string | null;
+  /** The next larger representation, which was refused, and why; null when none is larger or the density is met. */
+  next: { representation: ResolvedRepresentation; reason: string } | null;
 }
 
 /**
@@ -215,22 +222,24 @@ export function chooseRepresentation(
   const candidates = representations
     .filter(entry => role === "any" || entry.role === role)
     .sort((a, b) => representationFaceTexels(a) - representationFaceTexels(b) || representationGpuBytes(a) - representationGpuBytes(b));
-  const refusals: string[] = [];
+  const refusals: { representation: ResolvedRepresentation; reason: string }[] = [];
   let best: ResolvedRepresentation | null = null;
   for (const candidate of candidates) {
     const refusal = admissible(candidate);
     if (refusal) {
-      refusals.push(`${candidate.id}: ${refusal}`);
+      refusals.push({ representation: candidate, reason: refusal });
       if (representationFaceTexels(candidate) >= wantedFaceTexels) break;
       continue;
     }
     best = candidate;
-    if (representationFaceTexels(candidate) >= wantedFaceTexels) return { representation: candidate, limitation: null };
+    if (representationFaceTexels(candidate) >= wantedFaceTexels) return { representation: candidate, limitation: null, next: null };
   }
   if (!best) return null;
-  const larger = candidates.filter(entry => representationFaceTexels(entry) > representationFaceTexels(best!));
+  const chosen = best;
+  const larger = candidates.filter(entry => representationFaceTexels(entry) > representationFaceTexels(chosen));
+  const next = refusals.find(refusal => representationFaceTexels(refusal.representation) > representationFaceTexels(chosen)) ?? null;
   const limitation = larger.length === 0
-    ? `the largest available is ${Math.round(representationFaceTexels(best))} texels per face, below the ${Math.round(wantedFaceTexels)} asked for`
-    : `a larger representation does not fit: ${refusals.join("; ")}`;
-  return { representation: best, limitation };
+    ? `the largest available is ${Math.round(representationFaceTexels(chosen))} texels per face, below the ${Math.round(wantedFaceTexels)} asked for`
+    : `a larger representation does not fit: ${refusals.map(refusal => `${refusal.representation.id}: ${refusal.reason}`).join("; ")}`;
+  return { representation: chosen, limitation, next };
 }

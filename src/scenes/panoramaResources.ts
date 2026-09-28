@@ -14,6 +14,7 @@ import type { ResolvedAsset, ResolvedRepresentation } from "./format";
 import {
   MIB,
   createResourcePools,
+  representationAroundPx,
   representationGpuBytes,
   representationMaxSide,
   type PoolLimits,
@@ -48,8 +49,8 @@ export interface ResourceSettings {
   requests: number;
   decodes: number;
   timeoutMs: number;
-  /** Largest immersion side, px: `immersionMaxSide`. */
-  immersionMaxSide: number;
+  /** The widest immersion image, px around the turn: `immersionWidth`. Infinite at the parameter's largest. */
+  immersionWidth: number;
 }
 
 export interface SourceHandle<Texture extends GpuSource = GpuSource> {
@@ -60,7 +61,7 @@ export interface SourceHandle<Texture extends GpuSource = GpuSource> {
   release(): void;
 }
 
-export type ResourceLimiter = PoolName | "overlap" | "device" | "immersionMaxSide" | "response" | "file" | "timeout" | "network";
+export type ResourceLimiter = PoolName | "overlap" | "device" | "immersionWidth" | "response" | "file" | "timeout" | "network";
 
 /** A load refused or failed, naming the limit or cause, for the list's message. */
 export class ResourceRefusal extends Error {
@@ -169,6 +170,11 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
     entry.gpu = null;
   }
 
+  function gpuRoom(): number {
+    const idle = [...entries.values()].filter(entry => entry.refs === 0 && entry.waiting === 0 && entry.gpu).reduce((sum, entry) => sum + (entry.gpu?.bytes ?? 0), 0);
+    return pools.limits().sourceGpu - pools.stats().sourceGpu.reserved + idle;
+  }
+
   function reserve(pool: PoolName, bytes: number, label: string, overlap = false): Reservation {
     let result = pools.reserve(pool, bytes, label, { overlap });
     if (!result.ok) {
@@ -236,8 +242,8 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
     const label = `${asset.id}/${representation.id}`;
     const side = representationMaxSide(representation);
     if (side > backend.maxTextureSide()) throw new ResourceRefusal(`${label} is ${side} px on a side; this device allows ${backend.maxTextureSide()}`, "device");
-    if (representation.role === "immersion" && side > settings.immersionMaxSide) {
-      throw new ResourceRefusal(`${label} is ${side} px on a side, over the ${settings.immersionMaxSide} px limit (scene.panorama.immersionMaxSide)`, "immersionMaxSide");
+    if (representation.role === "immersion" && representationAroundPx(representation) > settings.immersionWidth) {
+      throw new ResourceRefusal(`${label} is ${representationAroundPx(representation)} px around, over the ${Math.round(settings.immersionWidth)} px image detail (scene.panorama.immersionWidth)`, "immersionWidth");
     }
     entry.gpu = reserve("sourceGpu", representationGpuBytes(representation), label, overlap);
     const files: { name: CubeFaceName | "image"; url: string; width: number; height: number }[] = representation.projection === "cube"
@@ -358,9 +364,10 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
     wouldFit(representation: ResolvedRepresentation, overlap = false): boolean {
       const bytes = representationGpuBytes(representation);
       if (pools.fits("sourceGpu", bytes, { overlap })) return true;
-      const idle = [...entries.values()].filter(entry => entry.refs === 0 && entry.waiting === 0 && entry.gpu).reduce((sum, entry) => sum + (entry.gpu?.bytes ?? 0), 0);
-      return pools.limits().sourceGpu - pools.stats().sourceGpu.reserved + idle >= bytes;
+      return gpuRoom() >= bytes;
     },
+    /** GPU bytes a new source could have: what is free, and what idle sources would give up. */
+    gpuRoom,
     setSettings(next: ResourceSettings): void {
       settings = next;
       const over = pools.setLimits(next.limits);
@@ -399,8 +406,12 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
 
 export type PanoramaResources<Texture extends GpuSource = GpuSource> = ReturnType<typeof createPanoramaResources<Texture>>;
 
-/** The loading parameters as the resource manager takes them. */
-export function resourceSettingsFrom(read: (id: string) => unknown, deviceMaxSide: number): ResourceSettings {
+/**
+ * The loading parameters as the resource manager takes them. `immersionWidth`
+ * is the image detail, infinite at its largest, where only the device's
+ * texture limit applies.
+ */
+export function resourceSettingsFrom(read: (id: string) => unknown, immersionWidth: number): ResourceSettings {
   const number = (id: string): number => {
     const value = read(id);
     return typeof value === "number" && Number.isFinite(value) ? value : 0;
@@ -417,6 +428,6 @@ export function resourceSettingsFrom(read: (id: string) => unknown, deviceMaxSid
     requests: Math.max(1, Math.round(number("scene.panorama.requests"))),
     decodes: Math.max(1, Math.round(number("scene.panorama.decodes"))),
     timeoutMs: number("scene.panorama.requestTimeout") * 1000,
-    immersionMaxSide: Math.min(deviceMaxSide, Math.round(number("scene.panorama.immersionMaxSide")) || deviceMaxSide),
+    immersionWidth,
   };
 }
