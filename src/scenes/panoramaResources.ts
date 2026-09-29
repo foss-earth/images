@@ -86,8 +86,19 @@ export interface ResourceStats {
   transferredBytes: number;
 }
 
+/** Download bytes for one representation; cube faces share one total. */
+export interface ResourceProgress {
+  id: string;
+  assetId: string;
+  representation: ResolvedRepresentation;
+  receivedBytes: number;
+  totalBytes: number;
+  state: "loading" | "ready" | "failed" | "cancelled";
+}
+
 interface Entry<Texture extends GpuSource> {
   key: string;
+  asset: ResolvedAsset;
   representation: ResolvedRepresentation;
   refs: number;
   waiting: number;
@@ -96,6 +107,8 @@ interface Entry<Texture extends GpuSource> {
   promise: Promise<Texture>;
   texture: Texture | null;
   gpu: Reservation | null;
+  receivedBytes: number;
+  progressState: ResourceProgress["state"];
 }
 
 /** A counting semaphore that lets higher priorities through first. */
@@ -113,16 +126,21 @@ function createLimiter(limit: () => number) {
   };
   return {
     async run<T>(priority: number, signal: AbortSignal, work: () => Promise<T>): Promise<T> {
+      if (signal.aborted) throw abortError(signal);
       await new Promise<void>((resolve, reject) => {
-        const entry = { priority, start: resolve, signal };
-        queue.push(entry);
-        signal.addEventListener("abort", () => {
+        const onAbort = (): void => {
           const index = queue.indexOf(entry);
           if (index >= 0) { queue.splice(index, 1); reject(signal.reason); }
-        }, { once: true });
+        };
+        const entry = { priority, start: () => { signal.removeEventListener("abort", onAbort); resolve(); }, signal };
+        queue.push(entry);
+        signal.addEventListener("abort", onAbort, { once: true });
         pump();
       });
-      try { return await work(); } finally { active -= 1; pump(); }
+      try {
+        if (signal.aborted) throw abortError(signal);
+        return await work();
+      } finally { active -= 1; pump(); }
     },
     stats: () => ({ active, queued: queue.length }),
     pump,
@@ -138,7 +156,7 @@ export function sourceKey(asset: ResolvedAsset, representation: ResolvedRepresen
   return `${asset.id}@${asset.revision}/${representation.id}#${generation} ${urls}`;
 }
 
-export function createPanoramaResources<Texture extends GpuSource>(backend: ResourceBackend<Texture>, initial: ResourceSettings) {
+export function createPanoramaResources<Texture extends GpuSource>(backend: ResourceBackend<Texture>, initial: ResourceSettings, onProgress?: (progress: ResourceProgress) => void) {
   let settings = initial;
   const pools = createResourcePools(settings.limits);
   const entries = new Map<string, Entry<Texture>>();
@@ -163,6 +181,7 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
 
   function evict(entry: Entry<Texture>): void {
     if (entries.get(entry.key) === entry) entries.delete(entry.key);
+    if (!entry.texture) publish(entry, entry.asset, "cancelled");
     entry.controller.abort(new DOMException("Evicted.", "AbortError"));
     entry.texture?.dispose();
     entry.texture = null;
@@ -185,7 +204,7 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
     return result.reservation;
   }
 
-  async function fetchFile(url: string, declaredBytes: number, grow: (bytes: number) => boolean, signal: AbortSignal): Promise<{ bytes: Uint8Array; contentType: string | null }> {
+  async function fetchFile(url: string, declaredBytes: number, grow: (bytes: number) => boolean, signal: AbortSignal, receivedChunk: (bytes: number) => void): Promise<{ bytes: Uint8Array; contentType: string | null }> {
     const timeout = AbortSignal.timeout(settings.timeoutMs);
     const combined = AbortSignal.any([signal, timeout]);
     let response: Response;
@@ -213,6 +232,7 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
         if (done) break;
         received += value.byteLength;
         transferredBytes += value.byteLength;
+        receivedChunk(value.byteLength);
         if (received > settings.responseBytes) {
           rejectedResponses += 1;
           throw new ResourceRefusal(`${url} passed the ${settings.responseBytes}-byte response limit while arriving (scene.panorama.responseMiB)`, "response");
@@ -261,7 +281,16 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
     const decodedReservations: Reservation[] = [];
     const bitmaps: ImageBitmap[] = [];
     try {
-      const bodies = await Promise.all(files.map(file => requests.run(priority, signal, () => fetchFile(file.url, declaredEach, grow, signal))));
+      const downloads = files.map(file => requests.run(priority, signal, () => fetchFile(file.url, declaredEach, grow, signal, bytes => {
+        entry.receivedBytes += bytes;
+        publish(entry, asset, "loading");
+      })));
+      const bodies = await Promise.all(downloads).catch(async error => {
+        // Stop the other faces before releasing the shared encoded reservation.
+        entry.controller.abort(error);
+        await Promise.allSettled(downloads);
+        throw error;
+      });
       if (signal.aborted) throw abortError(signal);
       files.forEach((file, index) => {
         const problem = checkImage(bodies[index].bytes, { mimeType: representation.mimeType, width: file.width, height: file.height }, bodies[index].contentType);
@@ -290,6 +319,15 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
     }
   }
 
+  function publish(entry: Entry<Texture>, asset: ResolvedAsset, state: ResourceProgress["state"]): void {
+    if (entry.progressState !== "loading") return;
+    entry.progressState = state;
+    onProgress?.({
+      id: entry.key, assetId: asset.id, representation: entry.representation,
+      receivedBytes: entry.receivedBytes, totalBytes: entry.representation.encodedBytes, state,
+    });
+  }
+
   return {
     /**
      * A shared source for `representation`, loaded if needed. `overlap`
@@ -302,18 +340,21 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
       let entry = entries.get(key);
       if (!entry) {
         const created: Entry<Texture> = {
-          key, representation, refs: 0, waiting: 0, lastUsed: ++tick, controller: new AbortController(),
-          promise: null as unknown as Promise<Texture>, texture: null, gpu: null,
+          key, asset, representation, refs: 0, waiting: 0, lastUsed: ++tick, controller: new AbortController(),
+          promise: null as unknown as Promise<Texture>, texture: null, gpu: null, receivedBytes: 0, progressState: "loading",
         };
+        publish(created, asset, "loading");
         created.promise = load(asset, representation, created, options.priority ?? 0, options.overlap === true).then(texture => {
           if (entries.get(key) !== created) { texture.dispose(); throw new DOMException("Released while loading.", "AbortError"); }
           created.texture = texture;
           created.gpu?.settle();
+          publish(created, asset, "ready");
           return texture;
         }, error => {
           if (entries.get(key) === created) entries.delete(key);
           created.gpu?.release();
           created.gpu = null;
+          publish(created, asset, error instanceof Error && error.name === "AbortError" ? "cancelled" : "failed");
           throw error;
         });
         created.promise.catch(() => {});
