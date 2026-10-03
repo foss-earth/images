@@ -4,7 +4,7 @@
  * Every pool is a user parameter (`scene.panorama.*MiB`); nothing here
  * decides a size.
  */
-import type { ResolvedRepresentation } from "./format";
+import type { ResolvedRepresentation, ResolvedTiledCube } from "./format";
 
 export const MIB = 1024 * 1024;
 /** RGBA8: four bytes a texel. */
@@ -22,29 +22,73 @@ export function rgba8Bytes(width: number, height: number, levels = mipLevelCount
   return BYTES_PER_TEXEL * texels * layers;
 }
 
-/** GPU bytes a representation needs once uploaded with its full mip chain. */
-export function representationGpuBytes(representation: ResolvedRepresentation): number {
+/**
+ * Where a tiled cube's tiles go: one atlas of `slots` stored tiles,
+ * `perRow` to a row, as many as `memoryBytes` holds within the device's
+ * largest texture side. Slot columns and rows are bytes in the display
+ * table, so neither passes 255. Null when not even one tile fits.
+ */
+export interface TileAtlasLayout {
+  stored: number;
+  slots: number;
+  perRow: number;
+  width: number;
+  height: number;
+  /** Exact bytes: the atlas, without mips, and the display table. */
+  gpuBytes: number;
+}
+
+/** Slot columns and rows are table bytes. */
+const MOST_SLOTS_A_SIDE = 255;
+
+export function tileAtlasLayout(representation: Pick<ResolvedTiledCube, "tileSize" | "gutter" | "faceSize">, memoryBytes: number, maxTextureSide = Number.POSITIVE_INFINITY): TileAtlasLayout | null {
+  const stored = representation.tileSize + 2 * representation.gutter;
+  const tileBytes = BYTES_PER_TEXEL * stored * stored;
+  const aSide = Math.min(MOST_SLOTS_A_SIDE, Math.floor(maxTextureSide / stored));
+  const wanted = Math.floor(memoryBytes / tileBytes);
+  if (aSide < 1 || wanted < 1) return null;
+  const perRow = Math.min(aSide, Math.ceil(Math.sqrt(wanted)));
+  const rows = Math.min(aSide, Math.ceil(wanted / perRow));
+  const slots = Math.min(wanted, perRow * rows);
+  const cells = representation.faceSize / representation.tileSize;
+  const tableBytes = BYTES_PER_TEXEL * 6 * cells * 2 * cells;
+  return { stored, slots, perRow, width: perRow * stored, height: rows * stored, gpuBytes: BYTES_PER_TEXEL * perRow * stored * rows * stored + tableBytes };
+}
+
+/** A tiled cube's tile count: 6 · Σ 4^level. */
+export function tiledCubeTileCount(representation: Pick<ResolvedTiledCube, "levelBytes">): number {
+  return 6 * representation.levelBytes.reduce((sum, _bytes, level) => sum + 4 ** level, 0);
+}
+
+/**
+ * GPU bytes a representation needs once uploaded with its full mip chain; for
+ * a tiled cube, the atlas `tileMemoryBytes` lays out, which holds part of it.
+ */
+export function representationGpuBytes(representation: ResolvedRepresentation, tileMemoryBytes = 0, maxTextureSide = Number.POSITIVE_INFINITY): number {
+  if (representation.projection === "tiled-cube") return tileAtlasLayout(representation, tileMemoryBytes, maxTextureSide)?.gpuBytes ?? 0;
   return representation.projection === "cube"
     ? rgba8Bytes(representation.faceSize, representation.faceSize, undefined, CUBE_LAYERS)
     : rgba8Bytes(representation.width, representation.height);
 }
 
-/** Decoded bytes one image of the representation holds at once: a face, or the whole image. */
+/** Decoded bytes one image of the representation holds at once: a face, the whole image, or a stored tile. */
 export function representationDecodedBytes(representation: ResolvedRepresentation): number {
+  if (representation.projection === "tiled-cube") return BYTES_PER_TEXEL * (representation.tileSize + 2 * representation.gutter) ** 2;
   return representation.projection === "cube"
     ? BYTES_PER_TEXEL * representation.faceSize * representation.faceSize
     : BYTES_PER_TEXEL * representation.width * representation.height;
 }
 
-/** Its largest texture side, checked against the device's limits before any decode. */
+/** Its largest texture side, checked against the device's limits before any decode; a tile for a tiled cube. */
 export function representationMaxSide(representation: ResolvedRepresentation): number {
+  if (representation.projection === "tiled-cube") return representation.tileSize + 2 * representation.gutter;
   return representation.projection === "cube" ? representation.faceSize : representation.width;
 }
 
-/** The texels a representation puts across a cube face's width, the density scale both projections share. */
+/** The texels a representation puts across a cube face's width, the density scale every projection shares. */
 export function representationFaceTexels(representation: ResolvedRepresentation): number {
   // A face spans 90° of the 360° an equirectangular row covers.
-  return representation.projection === "cube" ? representation.faceSize : representation.width / 4;
+  return representation.projection === "equirectangular" ? representation.width / 4 : representation.faceSize;
 }
 
 /** Pixels around the whole turn: an equirectangular image's width, or four cube faces. */

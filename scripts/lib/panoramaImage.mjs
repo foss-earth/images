@@ -443,6 +443,50 @@ export function renderCubeFace(pyramid, face, size) {
   return { width: size, height: size, data };
 }
 
+/**
+ * One face of a tiled cube (src/scenes/tiles/cubeTiling.ts) of `size`
+ * texels, in linear light, with `gutter` more texels on every side sampled
+ * at the face's own coordinates continued past its edge: inside the face
+ * they are a neighbouring tile's texels, past its edge the next face's. A
+ * face position s in −1…1 is the direction f + w(s)·r + w(t)·t, with
+ * w(s) = tan(s·π/4) for "equi-angular" and s for "gnomonic". Each texel
+ * averages a supersampled grid, as renderCubeFace does, so every level is
+ * resampled from the source by the same rule.
+ */
+export function renderTileFace(pyramid, face, size, warp, gutter) {
+  const { f, r, t } = CUBE_FACES[face];
+  const side = size + 2 * gutter;
+  const ratio = pyramid[0].width / 4 / size;
+  const level = Math.max(0, Math.min(pyramid.length - 1, Math.floor(Math.log2(Math.max(1, ratio)))));
+  const source = pyramid[level];
+  const residual = source.width / 4 / size;
+  const samples = residual > 1.5 ? 3 : 2;
+  const equiAngular = warp === "equi-angular";
+  const data = new Float32Array(side * side * 3);
+  const colour = [0, 0, 0];
+  const warped = s => (equiAngular ? Math.tan((s * Math.PI) / 4) : s);
+  for (let j = 0; j < side; j++) for (let i = 0; i < side; i++) {
+    let red = 0, green = 0, blue = 0;
+    for (let sj = 0; sj < samples; sj++) for (let si = 0; si < samples; si++) {
+      const a = warped(2 * ((i - gutter + (si + 0.5) / samples) / size) - 1);
+      const b = warped(1 - 2 * ((j - gutter + (sj + 0.5) / samples) / size));
+      const [u, v] = equirectUv(f[0] + a * r[0] + b * t[0], f[1] + a * r[1] + b * t[1], f[2] + a * r[2] + b * t[2]);
+      sampleEquirect(source, u, v, colour);
+      red += colour[0]; green += colour[1]; blue += colour[2];
+    }
+    const n = samples * samples, d = (j * side + i) * 3;
+    data[d] = red / n; data[d + 1] = green / n; data[d + 2] = blue / n;
+  }
+  return { width: side, height: side, data };
+}
+
+/** A `width` × `height` window of an sRGB image at (x, y). */
+export function cropImage({ width, rgb }, x, y, cropWidth, cropHeight) {
+  const out = new Uint8Array(cropWidth * cropHeight * 3);
+  for (let row = 0; row < cropHeight; row++) out.set(rgb.subarray(((y + row) * width + x) * 3, ((y + row) * width + x + cropWidth) * 3), row * cropWidth * 3);
+  return { width: cropWidth, height: cropHeight, rgb: out };
+}
+
 // ─── The cardinal/text fixture ─────────────────────────────────────────
 
 // Stroke letters on a unit box, x right and y up, as seen from inside the sphere.

@@ -10,23 +10,25 @@
  */
 import type { CubeFaceName } from "./panoramaMath";
 import { CUBE_FACE_NAMES } from "./panoramaMath";
-import type { ResolvedAsset, ResolvedRepresentation } from "./format";
+import type { ResolvedAsset, ResolvedRepresentation, ResolvedTiledCube } from "./format";
 import {
   MIB,
   createResourcePools,
   representationAroundPx,
   representationGpuBytes,
   representationMaxSide,
+  tileAtlasLayout,
   type PoolLimits,
   type PoolName,
   type Reservation,
   type ResourcePools,
+  type TileAtlasLayout,
 } from "./budget";
 import { checkImage, type ImageKind } from "./imageHeaders";
 
-/** A texture on the GPU, as the renderer's uploader makes it. */
+/** A texture on the GPU, as the renderer's uploader makes it, or a tiled cube's atlas. */
 export interface GpuSource {
-  readonly kind: "cube" | "equirectangular";
+  readonly kind: "cube" | "equirectangular" | "tiles";
   readonly gpuBytes: number;
   dispose(): void;
 }
@@ -36,6 +38,8 @@ export interface ResourceBackend<Texture extends GpuSource = GpuSource> {
   decode(bytes: Uint8Array, mimeType: ImageKind): Promise<ImageBitmap>;
   uploadCube(faces: Readonly<Record<CubeFaceName, ImageBitmap>>, label: string): Promise<Texture>;
   uploadEquirect(image: ImageBitmap, label: string): Promise<Texture>;
+  /** A tiled cube's atlas laid out as `layout`, with its scheduler; it fetches its own tiles as it is shown. */
+  createTiles(representation: ResolvedTiledCube, layout: TileAtlasLayout, label: string): Promise<Texture>;
   /** The device's largest texture side, px. */
   maxTextureSide(): number;
 }
@@ -51,12 +55,16 @@ export interface ResourceSettings {
   timeoutMs: number;
   /** The widest immersion image, px around the turn: `immersionWidth`. Infinite at the parameter's largest. */
   immersionWidth: number;
+  /** A tiled cube's atlas: `tileMemoryMiB`. */
+  tileMemoryBytes: number;
 }
 
 export interface SourceHandle<Texture extends GpuSource = GpuSource> {
   readonly texture: Texture;
   readonly representation: ResolvedRepresentation;
   readonly key: string;
+  /** A tiled cube's preview cube, held with it: what shows where no tile has arrived. */
+  readonly fallback?: SourceHandle<Texture>;
   /** Idempotent. The source stays cached until its room is needed. */
   release(): void;
 }
@@ -151,8 +159,10 @@ function abortError(signal: AbortSignal): Error {
   return signal.reason instanceof Error ? signal.reason : new DOMException("Cancelled.", "AbortError");
 }
 
-export function sourceKey(asset: ResolvedAsset, representation: ResolvedRepresentation, generation: number): string {
-  const urls = representation.projection === "cube" ? CUBE_FACE_NAMES.map(face => representation.faces[face]).join(" ") : representation.url;
+/** `tileSlots` tells two atlases of one tiled cube apart: another tile memory makes another source. */
+export function sourceKey(asset: ResolvedAsset, representation: ResolvedRepresentation, generation: number, tileSlots = 0): string {
+  const urls = representation.projection === "cube" ? CUBE_FACE_NAMES.map(face => representation.faces[face]).join(" ")
+    : representation.projection === "tiled-cube" ? `${representation.url} ${tileSlots} slots` : representation.url;
   return `${asset.id}@${asset.revision}/${representation.id}#${generation} ${urls}`;
 }
 
@@ -257,9 +267,20 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
     return { bytes, contentType: response.headers.get("content-type") };
   }
 
+  /** A tiled cube's atlas, within the device's texture side; null when not one tile fits. */
+  const layoutOf = (representation: ResolvedTiledCube): TileAtlasLayout | null => tileAtlasLayout(representation, settings.tileMemoryBytes, backend.maxTextureSide());
+  const gpuBytesOf = (representation: ResolvedRepresentation): number => representationGpuBytes(representation, settings.tileMemoryBytes, backend.maxTextureSide());
+
   async function load(asset: ResolvedAsset, representation: ResolvedRepresentation, entry: Entry<Texture>, priority: number, overlap: boolean): Promise<Texture> {
     const signal = entry.controller.signal;
     const label = `${asset.id}/${representation.id}`;
+    if (representation.projection === "tiled-cube") {
+      // Only the atlas is made here; the tiles come as the view asks for them, a frame at a time.
+      const layout = layoutOf(representation);
+      if (!layout) throw new ResourceRefusal(`${label}: not one ${representationMaxSide(representation)} px tile fits the tile memory (scene.panorama.tileMemoryMiB) within this device's ${backend.maxTextureSide()} px textures`, "device");
+      entry.gpu = reserve("sourceGpu", layout.gpuBytes, label, overlap);
+      return backend.createTiles(representation, layout, label);
+    }
     const side = representationMaxSide(representation);
     if (side > backend.maxTextureSide()) throw new ResourceRefusal(`${label} is ${side} px on a side; this device allows ${backend.maxTextureSide()}`, "device");
     if (representation.role === "immersion" && representationAroundPx(representation) > settings.immersionWidth) {
@@ -328,82 +349,112 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
     });
   }
 
+  /** A shared source for a cube or an image, loaded if needed. */
+  function acquireSource(asset: ResolvedAsset, representation: ResolvedRepresentation, options: { signal?: AbortSignal; priority?: number; overlap?: boolean }): Promise<SourceHandle<Texture>> {
+    const key = sourceKey(asset, representation, generation, representation.projection === "tiled-cube" ? layoutOf(representation)?.slots ?? 0 : 0);
+    let entry = entries.get(key);
+    if (!entry) {
+      const created: Entry<Texture> = {
+        key, asset, representation, refs: 0, waiting: 0, lastUsed: ++tick, controller: new AbortController(),
+        promise: null as unknown as Promise<Texture>, texture: null, gpu: null, receivedBytes: 0, progressState: "loading",
+      };
+      publish(created, asset, "loading");
+      created.promise = load(asset, representation, created, options.priority ?? 0, options.overlap === true).then(texture => {
+        if (entries.get(key) !== created) { texture.dispose(); throw new DOMException("Released while loading.", "AbortError"); }
+        created.texture = texture;
+        created.gpu?.settle();
+        publish(created, asset, "ready");
+        return texture;
+      }, error => {
+        if (entries.get(key) === created) entries.delete(key);
+        created.gpu?.release();
+        created.gpu = null;
+        publish(created, asset, error instanceof Error && error.name === "AbortError" ? "cancelled" : "failed");
+        throw error;
+      });
+      created.promise.catch(() => {});
+      entries.set(key, created);
+      entry = created;
+    }
+    const current = entry;
+    current.waiting += 1;
+    return new Promise<SourceHandle<Texture>>((resolve, reject) => {
+      let settled = false;
+      const onAbort = (): void => {
+        if (settled) return;
+        settled = true;
+        current.waiting -= 1;
+        // No one else wants an unfinished load: stop it.
+        if (current.waiting === 0 && current.refs === 0 && !current.texture) evict(current);
+        reject(abortError(options.signal!));
+      };
+      options.signal?.addEventListener("abort", onAbort, { once: true });
+      if (options.signal?.aborted) { onAbort(); return; }
+      current.promise.then(texture => {
+        if (settled) return;
+        settled = true;
+        options.signal?.removeEventListener("abort", onAbort);
+        current.waiting -= 1;
+        current.refs += 1;
+        current.lastUsed = ++tick;
+        let released = false;
+        resolve({
+          texture, representation, key,
+          release() {
+            if (released) return;
+            released = true;
+            current.refs -= 1;
+            current.lastUsed = ++tick;
+          },
+        });
+      }, error => {
+        if (settled) return;
+        settled = true;
+        options.signal?.removeEventListener("abort", onAbort);
+        current.waiting -= 1;
+        reject(error);
+      });
+    });
+  }
+
+  /**
+   * A tiled cube's atlas, held with the preview cube it shows over: the
+   * preview is acquired too, normally already on the GPU, so the handle draws
+   * at once. Released together.
+   */
+  async function acquireTiled(asset: ResolvedAsset, representation: ResolvedTiledCube, options: { signal?: AbortSignal; priority?: number; overlap?: boolean; fallback?: ResolvedRepresentation }): Promise<SourceHandle<Texture>> {
+    const preview = options.fallback ?? asset.representations.find(entry => entry.role === "preview" && entry.projection === "cube");
+    if (!preview || preview.projection !== "cube") throw new ResourceRefusal(`${asset.id}/${representation.id} needs a preview cube to show over`, "file");
+    const [tiles, fallback] = await Promise.allSettled([acquireSource(asset, representation, options), acquireSource(asset, preview, { ...options, overlap: false })]);
+    if (tiles.status === "rejected" || fallback.status === "rejected") {
+      if (tiles.status === "fulfilled") tiles.value.release();
+      if (fallback.status === "fulfilled") fallback.value.release();
+      throw tiles.status === "rejected" ? tiles.reason : (fallback as PromiseRejectedResult).reason;
+    }
+    const held = tiles.value;
+    return {
+      texture: held.texture, representation, key: held.key, fallback: fallback.value,
+      release() {
+        held.release();
+        fallback.value.release();
+      },
+    };
+  }
+
   return {
     /**
      * A shared source for `representation`, loaded if needed. `overlap`
      * counts it against the replacement allowance while an outgoing source
      * is still shown. Rejects with a ResourceRefusal naming the limit.
      */
-    acquire(asset: ResolvedAsset, representation: ResolvedRepresentation, options: { signal?: AbortSignal; priority?: number; overlap?: boolean } = {}): Promise<SourceHandle<Texture>> {
+    acquire(asset: ResolvedAsset, representation: ResolvedRepresentation, options: { signal?: AbortSignal; priority?: number; overlap?: boolean; fallback?: ResolvedRepresentation } = {}): Promise<SourceHandle<Texture>> {
       if (disposed) return Promise.reject(new DOMException("The scene's resources are disposed.", "AbortError"));
-      const key = sourceKey(asset, representation, generation);
-      let entry = entries.get(key);
-      if (!entry) {
-        const created: Entry<Texture> = {
-          key, asset, representation, refs: 0, waiting: 0, lastUsed: ++tick, controller: new AbortController(),
-          promise: null as unknown as Promise<Texture>, texture: null, gpu: null, receivedBytes: 0, progressState: "loading",
-        };
-        publish(created, asset, "loading");
-        created.promise = load(asset, representation, created, options.priority ?? 0, options.overlap === true).then(texture => {
-          if (entries.get(key) !== created) { texture.dispose(); throw new DOMException("Released while loading.", "AbortError"); }
-          created.texture = texture;
-          created.gpu?.settle();
-          publish(created, asset, "ready");
-          return texture;
-        }, error => {
-          if (entries.get(key) === created) entries.delete(key);
-          created.gpu?.release();
-          created.gpu = null;
-          publish(created, asset, error instanceof Error && error.name === "AbortError" ? "cancelled" : "failed");
-          throw error;
-        });
-        created.promise.catch(() => {});
-        entries.set(key, created);
-        entry = created;
-      }
-      const current = entry;
-      current.waiting += 1;
-      return new Promise<SourceHandle<Texture>>((resolve, reject) => {
-        let settled = false;
-        const onAbort = (): void => {
-          if (settled) return;
-          settled = true;
-          current.waiting -= 1;
-          // No one else wants an unfinished load: stop it.
-          if (current.waiting === 0 && current.refs === 0 && !current.texture) evict(current);
-          reject(abortError(options.signal!));
-        };
-        options.signal?.addEventListener("abort", onAbort, { once: true });
-        if (options.signal?.aborted) { onAbort(); return; }
-        current.promise.then(texture => {
-          if (settled) return;
-          settled = true;
-          options.signal?.removeEventListener("abort", onAbort);
-          current.waiting -= 1;
-          current.refs += 1;
-          current.lastUsed = ++tick;
-          let released = false;
-          resolve({
-            texture, representation, key,
-            release() {
-              if (released) return;
-              released = true;
-              current.refs -= 1;
-              current.lastUsed = ++tick;
-            },
-          });
-        }, error => {
-          if (settled) return;
-          settled = true;
-          options.signal?.removeEventListener("abort", onAbort);
-          current.waiting -= 1;
-          reject(error);
-        });
-      });
+      if (representation.projection === "tiled-cube") return acquireTiled(asset, representation, options);
+      return acquireSource(asset, representation, options);
     },
     /** Whether a representation's GPU bytes would fit now, evicting only idle sources. */
     wouldFit(representation: ResolvedRepresentation, overlap = false): boolean {
-      const bytes = representationGpuBytes(representation);
+      const bytes = gpuBytesOf(representation);
       if (pools.fits("sourceGpu", bytes, { overlap })) return true;
       return gpuRoom() >= bytes;
     },
@@ -470,5 +521,6 @@ export function resourceSettingsFrom(read: (id: string) => unknown, immersionWid
     decodes: Math.max(1, Math.round(number("scene.panorama.decodes"))),
     timeoutMs: number("scene.panorama.requestTimeout") * 1000,
     immersionWidth,
+    tileMemoryBytes: number("scene.panorama.tileMemoryMiB") * MIB,
   };
 }

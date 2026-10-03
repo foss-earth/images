@@ -226,12 +226,23 @@ function checkAttribution(checker: Checker, value: unknown, path: string, base: 
   return text === null ? null : { text, ...(license ? { license } : {}), ...(url ? { url } : {}) };
 }
 
+const PROJECTIONS = ["cube", "equirectangular", "tiled-cube"] as const;
+/** A tiled cube's levels: level 0 is one tile a face, and each level after it halves the tiles' size. */
+const MOST_TILE_LEVELS = 8;
+
 function checkRepresentation(checker: Checker, value: unknown, path: string, base: URL | null): ResolvedRepresentation | null {
   const record = checker.record(value, path);
   if (!record) return null;
-  const projection = checker.oneOf(record.projection, `${path}.projection`, ["cube", "equirectangular"] as const);
+  if (typeof record.projection === "string" && !(PROJECTIONS as readonly string[]).includes(record.projection)) {
+    // A later kind of image: the asset's other representations still show.
+    checker.warn(`${path}.projection`, `projection "${record.projection}" is not supported by this loader; this representation is skipped`);
+    return null;
+  }
+  const projection = checker.oneOf(record.projection, `${path}.projection`, PROJECTIONS);
   const common = ["id", "role", "projection", "mimeType", "encodedBytes", "extensions"];
-  checker.keys(record, path, projection === "cube" ? [...common, "faceSize", "faces"] : [...common, "width", "height", "url"]);
+  checker.keys(record, path, projection === "cube" ? [...common, "faceSize", "faces"]
+    : projection === "tiled-cube" ? [...common, "warp", "faceSize", "tileSize", "gutter", "levelBytes", "url"]
+      : [...common, "width", "height", "url"]);
   const id = checker.id(record.id, `${path}.id`);
   const role = checker.oneOf(record.role, `${path}.role`, ["preview", "immersion"] as const);
   const mimeType = checker.oneOf(record.mimeType, `${path}.mimeType`, MIME_TYPES);
@@ -259,6 +270,34 @@ function checkRepresentation(checker: Checker, value: unknown, path: string, bas
     const url = resolveUrl(checker, record.url, `${path}.url`, base);
     if (!id || !role || !mimeType || !encodedBytes || !width || !height || width !== 2 * height || !url) return null;
     return { id, role, projection, mimeType, encodedBytes, width, height, url, ...(Object.keys(extensions).length ? { extensions } : {}) };
+  }
+  if (projection === "tiled-cube") {
+    if (role === "preview") checker.fail(`${path}.role`, "must be \"immersion\": a tiled cube shows over its asset's preview cube, so it cannot be one");
+    const warp = checker.oneOf(record.warp, `${path}.warp`, ["equi-angular", "gnomonic"] as const);
+    const tileSize = checker.positiveInteger(record.tileSize, `${path}.tileSize`);
+    const faceSize = checker.positiveInteger(record.faceSize, `${path}.faceSize`);
+    let gutter: number | null = null;
+    if (typeof record.gutter === "number" && Number.isInteger(record.gutter) && record.gutter >= 0 && (tileSize === null || 2 * record.gutter < tileSize)) gutter = record.gutter;
+    else checker.fail(`${path}.gutter`, "must be a whole number of texels, at least 0 and less than half the tile size");
+    const list = checker.array(record.levelBytes, `${path}.levelBytes`);
+    let levelBytes: number[] | null = null;
+    if (list) {
+      const values = list.map((entry, level) => checker.positiveInteger(entry, `${path}.levelBytes[${level}]`));
+      if (list.length === 0 || list.length > MOST_TILE_LEVELS) checker.fail(`${path}.levelBytes`, `must list 1 to ${MOST_TILE_LEVELS} levels`);
+      else if (values.every((entry): entry is number => entry !== null)) levelBytes = values;
+    }
+    if (levelBytes && tileSize && faceSize && faceSize !== tileSize * 2 ** (levelBytes.length - 1)) {
+      checker.fail(`${path}.faceSize`, `must be the tile size times 2 to the number of levels less one: ${tileSize * 2 ** (levelBytes.length - 1)}`);
+      levelBytes = null;
+    }
+    if (levelBytes && encodedBytes && levelBytes.reduce((sum, entry) => sum + entry, 0) !== encodedBytes) {
+      checker.fail(`${path}.levelBytes`, "must add up to encodedBytes");
+      levelBytes = null;
+    }
+    const url = resolveUrl(checker, record.url, `${path}.url`, base);
+    if (url && !url.endsWith("/")) checker.fail(`${path}.url`, "must name the tiles' folder, ending with \"/\"");
+    if (!id || role !== "immersion" || !mimeType || !encodedBytes || !warp || !tileSize || !faceSize || gutter === null || !levelBytes || !url || !url.endsWith("/")) return null;
+    return { id, role, projection, warp, mimeType, encodedBytes, faceSize, tileSize, gutter, levelBytes, url, ...(Object.keys(extensions).length ? { extensions } : {}) };
   }
   return null;
 }
