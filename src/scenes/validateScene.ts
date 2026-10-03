@@ -17,9 +17,11 @@ import {
   type ResolvedAsset,
   type ResolvedPanorama,
   type ResolvedRepresentation,
+  type ResolvedSheetPlace,
   type SceneDiagnostic,
   type SceneExtensions,
   type SceneValidation,
+  type SheetRecord,
   type UnsupportedEntity,
   type ViewRecord,
 } from "./format";
@@ -121,6 +123,12 @@ class Checker {
   positiveInteger(value: unknown, path: string): number | null {
     if (typeof value === "number" && Number.isInteger(value) && value > 0) return value;
     this.fail(path, "must be a positive whole number");
+    return null;
+  }
+
+  nonNegativeInteger(value: unknown, path: string): number | null {
+    if (typeof value === "number" && Number.isInteger(value) && value >= 0) return value;
+    this.fail(path, "must be a whole number, 0 or more");
     return null;
   }
 
@@ -230,7 +238,41 @@ const PROJECTIONS = ["cube", "equirectangular", "tiled-cube"] as const;
 /** A tiled cube's levels: level 0 is one tile a face, and each level after it halves the tiles' size. */
 const MOST_TILE_LEVELS = 8;
 
-function checkRepresentation(checker: Checker, value: unknown, path: string, base: URL | null): ResolvedRepresentation | null {
+/** One of the scene's sheets: an image whose pixel size bounds the places cubes may name in it. */
+function checkSheet(checker: Checker, value: unknown, path: string, base: URL | null): SheetRecord | null {
+  const record = checker.record(value, path);
+  if (!record) return null;
+  checker.keys(record, path, ["id", "revision", "mimeType", "width", "height", "encodedBytes", "url"]);
+  const id = checker.id(record.id, `${path}.id`);
+  const revision = checker.text(record.revision, `${path}.revision`);
+  const mimeType = checker.oneOf(record.mimeType, `${path}.mimeType`, MIME_TYPES);
+  const width = checker.positiveInteger(record.width, `${path}.width`);
+  const height = checker.positiveInteger(record.height, `${path}.height`);
+  const encodedBytes = checker.positiveInteger(record.encodedBytes, `${path}.encodedBytes`);
+  const url = resolveUrl(checker, record.url, `${path}.url`, base);
+  if (!id || !revision || !mimeType || !width || !height || !encodedBytes || !url) return null;
+  return { id, revision, mimeType, width, height, encodedBytes, url };
+}
+
+/** A cube's place in a sheet: the sheet exists and the six faces lie inside it. */
+function checkSheetPlace(checker: Checker, value: unknown, path: string, faceSize: number | null, sheets: ReadonlyMap<string, SheetRecord>): ResolvedSheetPlace | null {
+  const record = checker.record(value, path);
+  if (!record) return null;
+  checker.keys(record, path, ["id", "x", "y"]);
+  const id = checker.id(record.id, `${path}.id`);
+  const x = checker.nonNegativeInteger(record.x, `${path}.x`);
+  const y = checker.nonNegativeInteger(record.y, `${path}.y`);
+  const sheet = id ? sheets.get(id) : undefined;
+  if (id && !sheet) checker.fail(`${path}.id`, `names "${id}", which is not a sheet of this scene`);
+  if (!sheet || x === null || y === null || !faceSize) return null;
+  if (x + CUBE_FACE_NAMES.length * faceSize > sheet.width || y + faceSize > sheet.height) {
+    checker.fail(path, `puts six ${faceSize} px faces at (${x}, ${y}), outside the ${sheet.width} × ${sheet.height} px sheet "${sheet.id}"`);
+    return null;
+  }
+  return { ...sheet, x, y };
+}
+
+function checkRepresentation(checker: Checker, value: unknown, path: string, base: URL | null, sheets: ReadonlyMap<string, SheetRecord>): ResolvedRepresentation | null {
   const record = checker.record(value, path);
   if (!record) return null;
   if (typeof record.projection === "string" && !(PROJECTIONS as readonly string[]).includes(record.projection)) {
@@ -240,7 +282,7 @@ function checkRepresentation(checker: Checker, value: unknown, path: string, bas
   }
   const projection = checker.oneOf(record.projection, `${path}.projection`, PROJECTIONS);
   const common = ["id", "role", "projection", "mimeType", "encodedBytes", "extensions"];
-  checker.keys(record, path, projection === "cube" ? [...common, "faceSize", "faces"]
+  checker.keys(record, path, projection === "cube" ? [...common, "faceSize", "faces", "sheet"]
     : projection === "tiled-cube" ? [...common, "warp", "faceSize", "tileSize", "gutter", "levelBytes", "url"]
       : [...common, "width", "height", "url"]);
   const id = checker.id(record.id, `${path}.id`);
@@ -260,8 +302,9 @@ function checkRepresentation(checker: Checker, value: unknown, path: string, bas
         if (url) resolved[face] = url;
       }
     }
+    const sheet = record.sheet === undefined ? null : checkSheetPlace(checker, record.sheet, `${path}.sheet`, faceSize, sheets);
     if (!id || !role || !mimeType || !encodedBytes || !faceSize || Object.keys(resolved).length !== 6) return null;
-    return { id, role, projection, mimeType, encodedBytes, faceSize, faces: resolved as Record<CubeFaceName, string>, ...(Object.keys(extensions).length ? { extensions } : {}) };
+    return { id, role, projection, mimeType, encodedBytes, faceSize, faces: resolved as Record<CubeFaceName, string>, ...(sheet ? { sheet } : {}), ...(Object.keys(extensions).length ? { extensions } : {}) };
   }
   if (projection === "equirectangular") {
     const width = checker.positiveInteger(record.width, `${path}.width`);
@@ -302,7 +345,7 @@ function checkRepresentation(checker: Checker, value: unknown, path: string, bas
   return null;
 }
 
-function checkAsset(checker: Checker, value: unknown, path: string, base: URL | null): { asset: ResolvedAsset | null; unsupportedType: string | null; id: string | null } {
+function checkAsset(checker: Checker, value: unknown, path: string, base: URL | null, sheets: ReadonlyMap<string, SheetRecord>): { asset: ResolvedAsset | null; unsupportedType: string | null; id: string | null } {
   const record = checker.record(value, path);
   if (!record) return { asset: null, unsupportedType: null, id: null };
   const id = checker.id(record.id, `${path}.id`);
@@ -322,7 +365,7 @@ function checkAsset(checker: Checker, value: unknown, path: string, base: URL | 
   const representations: ResolvedRepresentation[] = [];
   const seen = new Set<string>();
   list.forEach((entry, index) => {
-    const representation = checkRepresentation(checker, entry, `${path}.representations[${index}]`, base);
+    const representation = checkRepresentation(checker, entry, `${path}.representations[${index}]`, base, sheets);
     if (!representation) return;
     if (seen.has(representation.id)) checker.fail(`${path}.representations[${index}].id`, `repeats representation id "${representation.id}" in this asset`);
     seen.add(representation.id);
@@ -533,6 +576,8 @@ export function validateScene(input: unknown, options: ValidateSceneOptions = {}
   const countOf = (value: unknown): number => (Array.isArray(value) ? value.length : 0);
   if (countOf(root.entities) > limits.entities) checker.fail("$.entities", `has ${countOf(root.entities)} entities, over the limit of ${limits.entities} (scene.entityLimit)`);
   if (countOf(root.assets) > limits.assets) checker.fail("$.assets", `has ${countOf(root.assets)} assets, over the limit of ${limits.assets} (scene.assetLimit)`);
+  // A sheet holds at least one cube, so a scene has no use for more sheets than assets.
+  if (countOf(root.sheets) > limits.assets) checker.fail("$.sheets", `has ${countOf(root.sheets)} sheets, over the limit of ${limits.assets} (scene.assetLimit)`);
   const linkCount = Array.isArray(root.entities)
     ? root.entities.reduce((sum: number, entity) => sum + (isRecord(entity) && Array.isArray(entity.links) ? entity.links.length : 0), 0)
     : 0;
@@ -544,7 +589,7 @@ export function validateScene(input: unknown, options: ValidateSceneOptions = {}
     try { base = new URL(String(options.baseUrl)); } catch { checker.fail("$", `the base URL ${String(options.baseUrl)} is not a URL`); }
   }
 
-  checker.keys(root, "$", ["format", "version", "id", "revision", "title", "requiredExtensions", "extensions", "assets", "entities", "groups", "initialPanorama", "overview", "markerStyle"]);
+  checker.keys(root, "$", ["format", "version", "id", "revision", "title", "requiredExtensions", "extensions", "assets", "sheets", "entities", "groups", "initialPanorama", "overview", "markerStyle"]);
   const sceneStyle = root.markerStyle === undefined ? {} : checkMarkerStyle(checker, root.markerStyle, "$.markerStyle");
   const id = checker.id(root.id, "$.id");
   const revision = checker.text(root.revision, "$.revision");
@@ -560,10 +605,21 @@ export function validateScene(input: unknown, options: ValidateSceneOptions = {}
     });
   }
 
+  // Before the assets, whose cubes name their places in them.
+  const sheets = new Map<string, SheetRecord>();
+  if (root.sheets !== undefined) {
+    (checker.array(root.sheets, "$.sheets") ?? []).forEach((entry, index) => {
+      const sheet = checkSheet(checker, entry, `$.sheets[${index}]`, base);
+      if (!sheet) return;
+      if (sheets.has(sheet.id)) checker.fail(`$.sheets[${index}].id`, `repeats sheet id "${sheet.id}"`);
+      sheets.set(sheet.id, sheet);
+    });
+  }
+
   const assets = new Map<string, ResolvedAsset>();
   const unsupportedAssets = new Map<string, string>();
   (checker.array(root.assets, "$.assets") ?? []).forEach((entry, index) => {
-    const { asset, unsupportedType, id: assetId } = checkAsset(checker, entry, `$.assets[${index}]`, base);
+    const { asset, unsupportedType, id: assetId } = checkAsset(checker, entry, `$.assets[${index}]`, base, sheets);
     if (!assetId) return;
     if (assets.has(assetId) || unsupportedAssets.has(assetId)) checker.fail(`$.assets[${index}].id`, `repeats asset id "${assetId}"`);
     if (asset) assets.set(assetId, asset);
@@ -663,6 +719,7 @@ export function validateScene(input: unknown, options: ValidateSceneOptions = {}
       title,
       baseUrl: base?.href ?? null,
       assets,
+      sheets,
       panoramas,
       entityOrder,
       unsupported,

@@ -10,7 +10,7 @@
  */
 import type { CubeFaceName } from "./panoramaMath";
 import { CUBE_FACE_NAMES } from "./panoramaMath";
-import type { ResolvedAsset, ResolvedRepresentation, ResolvedTiledCube } from "./format";
+import type { ResolvedAsset, ResolvedRepresentation, ResolvedSheetPlace, ResolvedTiledCube } from "./format";
 import {
   MIB,
   createResourcePools,
@@ -25,7 +25,7 @@ import {
   type TileAtlasLayout,
 } from "./budget";
 import { checkImage, type ImageKind } from "./imageHeaders";
-import { mediaGroup, type MediaStore, type SavedFiles } from "./mediaStore";
+import { mediaGroup, type MediaGroup, type MediaStore, type SavedFiles } from "./mediaStore";
 
 /** A texture on the GPU, as the renderer's uploader makes it, or a tiled cube's atlas. */
 export interface GpuSource {
@@ -38,6 +38,8 @@ export interface ResourceBackend<Texture extends GpuSource = GpuSource> {
   fetch(url: string, init: RequestInit): Promise<Response>;
   decode(bytes: Uint8Array, mimeType: ImageKind): Promise<ImageBitmap>;
   uploadCube(faces: Readonly<Record<CubeFaceName, ImageBitmap>>, label: string): Promise<Texture>;
+  /** A rectangle of a decoded image as an image of its own: a cube's face out of a preview sheet. Left out, sheets are not read. */
+  crop?(image: ImageBitmap, x: number, y: number, width: number, height: number): Promise<ImageBitmap>;
   uploadEquirect(image: ImageBitmap, label: string): Promise<Texture>;
   /**
    * A tiled cube's atlas laid out as `layout`, with its scheduler; it fetches
@@ -63,6 +65,8 @@ export interface ResourceSettings {
   immersionWidth: number;
   /** A tiled cube's atlas: `tileMemoryMiB`. */
   tileMemoryBytes: number;
+  /** Whether a cube with a place in a preview sheet loads from the sheet: `previewSheets`. */
+  previewSheets: boolean;
 }
 
 export interface SourceHandle<Texture extends GpuSource = GpuSource> {
@@ -102,6 +106,8 @@ export interface ResourceStats {
   /** Files, and their bytes, that came from the images kept between visits instead. */
   reusedFiles: number;
   reusedBytes: number;
+  /** Cubes whose faces came out of a preview sheet, not their own six files. */
+  cubesFromSheets: number;
 }
 
 /** Download bytes for one representation; cube faces share one total. */
@@ -190,6 +196,7 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
   let transferredBytes = 0;
   let reusedFiles = 0;
   let reusedBytes = 0;
+  let cubesFromSheets = 0;
 
   /** Frees unreferenced sources, least recently used first, until `bytes` fits. */
   function makeRoom(pool: PoolName, bytes: number, overlap: boolean): void {
@@ -279,6 +286,143 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
     return { bytes, contentType: response.headers.get("content-type") };
   }
 
+  // ─── Preview sheets ─────────────────────────────────────────────────
+  /** A sheet decoding or decoded, shared by every cube loading from it and closed when the last lets go. */
+  interface SheetUse {
+    key: string;
+    users: number;
+    controller: AbortController;
+    image: Promise<ImageBitmap>;
+    bitmap: ImageBitmap | null;
+    decoded: Reservation | null;
+  }
+  const sheetUses = new Map<string, SheetUse>();
+  /** Sheets that failed: their cubes load from their own files for the rest of the visit. */
+  const failedSheets = new Set<string>();
+  const sheetKey = (sheet: ResolvedSheetPlace): string => `${sheet.id}@${sheet.revision} ${sheet.url}`;
+  const sheetGroup = (sheet: ResolvedSheetPlace): MediaGroup => ({ id: `sheet ${sheet.id}@${sheet.revision}`, label: `${sheet.id} · preview sheet` });
+
+  function closeSheet(use: SheetUse): void {
+    if (sheetUses.get(use.key) === use) sheetUses.delete(use.key);
+    use.controller.abort(new DOMException("No orb is waiting for the sheet.", "AbortError"));
+    use.bitmap?.close();
+    use.bitmap = null;
+    use.decoded?.release();
+    use.decoded = null;
+  }
+
+  async function loadSheet(sheet: ResolvedSheetPlace, use: SheetUse, priority: number): Promise<ImageBitmap> {
+    const signal = use.controller.signal;
+    const saved = backend.media?.files(sheetGroup(sheet)) ?? null;
+    const encoded = reserve("encoded", sheet.encodedBytes, `${sheet.id} encoded`);
+    let extra = 0;
+    const grow = (bytes: number): boolean => {
+      if (!encoded.resize(sheet.encodedBytes + extra + bytes)) return false;
+      extra += bytes;
+      return true;
+    };
+    const headerProblem = (body: { bytes: Uint8Array; contentType: string | null }): string | null =>
+      checkImage(body.bytes, { mimeType: sheet.mimeType, width: sheet.width, height: sheet.height }, body.contentType);
+    try {
+      let body = saved ? await saved.get(sheet.url) : null;
+      if (signal.aborted) throw abortError(signal);
+      if (body && headerProblem(body)) { saved!.forget(sheet.url); body = null; }
+      const kept = body !== null;
+      if (body) {
+        if (body.bytes.byteLength > sheet.encodedBytes && !grow(body.bytes.byteLength - sheet.encodedBytes)) throw new ResourceRefusal(`${sheet.url} is larger than declared and passed the encoded-bytes limit (scene.panorama.encodedMiB)`, "encoded");
+        reusedFiles += 1;
+        reusedBytes += body.bytes.byteLength;
+      } else {
+        body = await requests.run(priority, signal, () => fetchFile(sheet.url, sheet.encodedBytes, grow, signal, () => {}));
+        const problem = headerProblem(body);
+        if (problem) throw new ResourceRefusal(`${sheet.url} ${problem}`, "file");
+        saved?.put(sheet.url, body.bytes, body.contentType);
+      }
+      // Held decoded for as long as cubes are cut from it.
+      use.decoded = reserve("decoded", 4 * sheet.width * sheet.height, `${sheet.id} decoded`);
+      const bytes = body.bytes;
+      const bitmap = await decodes.run(priority, signal, () => backend.decode(bytes, sheet.mimeType)).catch(error => {
+        if (kept && !signal.aborted) saved!.forget(sheet.url);
+        throw error;
+      });
+      if (signal.aborted) {
+        bitmap.close();
+        throw abortError(signal);
+      }
+      return bitmap;
+    } finally {
+      encoded.release();
+    }
+  }
+
+  /** The sheet's decoded image for one cube, which lets go of it when it has its faces. */
+  function holdSheet(sheet: ResolvedSheetPlace, priority: number): { image: Promise<ImageBitmap>; release(): void } {
+    const key = sheetKey(sheet);
+    let use = sheetUses.get(key);
+    if (!use) {
+      const created: SheetUse = { key, users: 0, controller: new AbortController(), image: null as unknown as Promise<ImageBitmap>, bitmap: null, decoded: null };
+      created.image = loadSheet(sheet, created, priority).then(bitmap => {
+        created.bitmap = bitmap;
+        return bitmap;
+      }, error => {
+        const cancelled = created.controller.signal.aborted;
+        created.decoded?.release();
+        created.decoded = null;
+        if (sheetUses.get(key) === created) sheetUses.delete(key);
+        // One failure is enough: the cubes have their own files.
+        if (!cancelled) failedSheets.add(key);
+        throw error;
+      });
+      created.image.catch(() => {});
+      sheetUses.set(key, created);
+      use = created;
+    }
+    use.users += 1;
+    const held = use;
+    let released = false;
+    return {
+      image: held.image,
+      release() {
+        if (released) return;
+        released = true;
+        held.users -= 1;
+        if (held.users === 0) closeSheet(held);
+      },
+    };
+  }
+
+  /** A cube from its place in a sheet: six rectangles of the one decoded image, uploaded as its face files would be. */
+  async function cubeFromSheet(asset: ResolvedAsset, representation: Extract<ResolvedRepresentation, { projection: "cube" }>, entry: Entry<Texture>, priority: number): Promise<Texture> {
+    const signal = entry.controller.signal;
+    const place = representation.sheet!;
+    const size = representation.faceSize;
+    const use = holdSheet(place, priority);
+    const faces: ImageBitmap[] = [];
+    const reservations: Reservation[] = [];
+    try {
+      const image = await use.image;
+      if (signal.aborted) throw abortError(signal);
+      for (const face of CUBE_FACE_NAMES) reservations.push(reserve("decoded", 4 * size * size, `${asset.id}/${representation.id} ${face} decoded`));
+      for (let index = 0; index < CUBE_FACE_NAMES.length; index++) {
+        faces.push(await backend.crop!(image, place.x + index * size, place.y, size, size));
+        if (signal.aborted) throw abortError(signal);
+      }
+      entry.receivedBytes = representation.encodedBytes;
+      publish(entry, asset, "loading");
+      const texture = await backend.uploadCube(Object.fromEntries(CUBE_FACE_NAMES.map((face, index) => [face, faces[index]])) as Record<CubeFaceName, ImageBitmap>, `${asset.id}/${representation.id}`);
+      if (signal.aborted) {
+        texture.dispose();
+        throw abortError(signal);
+      }
+      cubesFromSheets += 1;
+      return texture;
+    } finally {
+      use.release();
+      for (const face of faces) face.close();
+      for (const reservation of reservations) reservation.release();
+    }
+  }
+
   /** A tiled cube's atlas, within the device's texture side; null when not one tile fits. */
   const layoutOf = (representation: ResolvedTiledCube): TileAtlasLayout | null => tileAtlasLayout(representation, settings.tileMemoryBytes, backend.maxTextureSide());
   const gpuBytesOf = (representation: ResolvedRepresentation): number => representationGpuBytes(representation, settings.tileMemoryBytes, backend.maxTextureSide());
@@ -299,6 +443,16 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
       throw new ResourceRefusal(`${label} is ${representationAroundPx(representation)} px around, over the ${Math.round(settings.immersionWidth)} px image detail (scene.panorama.immersionWidth)`, "immersionWidth");
     }
     entry.gpu = reserve("sourceGpu", representationGpuBytes(representation), label, overlap);
+    if (representation.projection === "cube" && representation.sheet && settings.previewSheets && backend.crop && !failedSheets.has(sheetKey(representation.sheet))) {
+      // One image for many cubes. If it fails, this cube's own files are still there, as for a loader that knows no sheets.
+      const sheetKeyNow = sheetKey(representation.sheet);
+      try {
+        return await cubeFromSheet(asset, representation, entry, priority);
+      } catch (error) {
+        if (signal.aborted) throw error;
+        failedSheets.add(sheetKeyNow);
+      }
+    }
     const files: { name: CubeFaceName | "image"; url: string; width: number; height: number }[] = representation.projection === "cube"
       ? CUBE_FACE_NAMES.map(face => ({ name: face, url: representation.faces[face], width: representation.faceSize, height: representation.faceSize }))
       : [{ name: "image", url: representation.url, width: representation.width, height: representation.height }];
@@ -529,12 +683,14 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
         transferredBytes,
         reusedFiles,
         reusedBytes,
+        cubesFromSheets,
       };
     },
     dispose(): void {
       if (disposed) return;
       disposed = true;
       for (const entry of [...entries.values()]) evict(entry);
+      for (const use of [...sheetUses.values()]) closeSheet(use);
     },
   };
 }
@@ -565,5 +721,6 @@ export function resourceSettingsFrom(read: (id: string) => unknown, immersionWid
     timeoutMs: number("scene.panorama.requestTimeout") * 1000,
     immersionWidth,
     tileMemoryBytes: number("scene.panorama.tileMemoryMiB") * MIB,
+    previewSheets: read("scene.panorama.previewSheets") !== false,
   };
 }
