@@ -25,6 +25,7 @@ import {
   type TileAtlasLayout,
 } from "./budget";
 import { checkImage, type ImageKind } from "./imageHeaders";
+import { mediaGroup, type MediaStore, type SavedFiles } from "./mediaStore";
 
 /** A texture on the GPU, as the renderer's uploader makes it, or a tiled cube's atlas. */
 export interface GpuSource {
@@ -38,10 +39,15 @@ export interface ResourceBackend<Texture extends GpuSource = GpuSource> {
   decode(bytes: Uint8Array, mimeType: ImageKind): Promise<ImageBitmap>;
   uploadCube(faces: Readonly<Record<CubeFaceName, ImageBitmap>>, label: string): Promise<Texture>;
   uploadEquirect(image: ImageBitmap, label: string): Promise<Texture>;
-  /** A tiled cube's atlas laid out as `layout`, with its scheduler; it fetches its own tiles as it is shown. */
-  createTiles(representation: ResolvedTiledCube, layout: TileAtlasLayout, label: string): Promise<Texture>;
+  /**
+   * A tiled cube's atlas laid out as `layout`, with its scheduler; it fetches
+   * its own tiles as it is shown, from `saved` where they were kept before.
+   */
+  createTiles(representation: ResolvedTiledCube, layout: TileAtlasLayout, label: string, saved: SavedFiles | null): Promise<Texture>;
   /** The device's largest texture side, px. */
   maxTextureSide(): number;
+  /** Images kept between visits: read before the network is asked, added to after. Left out, nothing is kept. */
+  media?: MediaStore;
 }
 
 /** Every value the `scene.panorama.*` loading parameters set. */
@@ -91,7 +97,11 @@ export interface ResourceStats {
   queuedDecodes: number;
   largestResponseBytes: number;
   rejectedResponses: number;
+  /** Bytes that arrived from the network. */
   transferredBytes: number;
+  /** Files, and their bytes, that came from the images kept between visits instead. */
+  reusedFiles: number;
+  reusedBytes: number;
 }
 
 /** Download bytes for one representation; cube faces share one total. */
@@ -178,6 +188,8 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
   let largestResponseBytes = 0;
   let rejectedResponses = 0;
   let transferredBytes = 0;
+  let reusedFiles = 0;
+  let reusedBytes = 0;
 
   /** Frees unreferenced sources, least recently used first, until `bytes` fits. */
   function makeRoom(pool: PoolName, bytes: number, overlap: boolean): void {
@@ -279,7 +291,7 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
       const layout = layoutOf(representation);
       if (!layout) throw new ResourceRefusal(`${label}: not one ${representationMaxSide(representation)} px tile fits the tile memory (scene.panorama.tileMemoryMiB) within this device's ${backend.maxTextureSide()} px textures`, "device");
       entry.gpu = reserve("sourceGpu", layout.gpuBytes, label, overlap);
-      return backend.createTiles(representation, layout, label);
+      return backend.createTiles(representation, layout, label, backend.media?.files(mediaGroup(asset, representation)) ?? null);
     }
     const side = representationMaxSide(representation);
     if (side > backend.maxTextureSide()) throw new ResourceRefusal(`${label} is ${side} px on a side; this device allows ${backend.maxTextureSide()}`, "device");
@@ -301,11 +313,40 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
     };
     const decodedReservations: Reservation[] = [];
     const bitmaps: ImageBitmap[] = [];
+    const saved = backend.media?.files(mediaGroup(asset, representation)) ?? null;
+    /** Files that came from the saved images: forgotten if they turn out not to decode. */
+    const fromSaved = new Set<string>();
+    const received = (bytes: number): void => {
+      entry.receivedBytes += bytes;
+      publish(entry, asset, "loading");
+    };
+    type File = (typeof files)[number];
+    const headerProblem = (file: File, body: { bytes: Uint8Array; contentType: string | null }): string | null =>
+      checkImage(body.bytes, { mimeType: representation.mimeType, width: file.width, height: file.height }, body.contentType);
+    /** A file's bytes, header-checked: the copy kept from an earlier visit, or the network's, which is then kept. */
+    const obtain = async (file: File): Promise<{ bytes: Uint8Array; contentType: string | null }> => {
+      const kept = saved ? await saved.get(file.url) : null;
+      if (signal.aborted) throw abortError(signal);
+      if (kept && headerProblem(file, kept)) saved!.forget(file.url);
+      else if (kept) {
+        // Held in memory until it is decoded, like a response: past its declared share, the encoded reservation grows.
+        if (kept.bytes.byteLength > declaredEach && !grow(kept.bytes.byteLength - declaredEach)) {
+          throw new ResourceRefusal(`${file.url} is larger than declared and passed the encoded-bytes limit (scene.panorama.encodedMiB)`, "encoded");
+        }
+        fromSaved.add(file.url);
+        reusedFiles += 1;
+        reusedBytes += kept.bytes.byteLength;
+        received(kept.bytes.byteLength);
+        return kept;
+      }
+      const body = await requests.run(priority, signal, () => fetchFile(file.url, declaredEach, grow, signal, received));
+      const problem = headerProblem(file, body);
+      if (problem) throw new ResourceRefusal(`${file.url} ${problem}`, "file");
+      saved?.put(file.url, body.bytes, body.contentType);
+      return body;
+    };
     try {
-      const downloads = files.map(file => requests.run(priority, signal, () => fetchFile(file.url, declaredEach, grow, signal, bytes => {
-        entry.receivedBytes += bytes;
-        publish(entry, asset, "loading");
-      })));
+      const downloads = files.map(obtain);
       const bodies = await Promise.all(downloads).catch(async error => {
         // Stop the other faces before releasing the shared encoded reservation.
         entry.controller.abort(error);
@@ -313,14 +354,14 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
         throw error;
       });
       if (signal.aborted) throw abortError(signal);
-      files.forEach((file, index) => {
-        const problem = checkImage(bodies[index].bytes, { mimeType: representation.mimeType, width: file.width, height: file.height }, bodies[index].contentType);
-        if (problem) throw new ResourceRefusal(`${file.url} ${problem}`, "file");
-      });
       // Header-checked sizes, not declarations, decide the decode reservation.
       for (const file of files) decodedReservations.push(reserve("decoded", 4 * file.width * file.height, `${label} ${file.name} decoded`));
       for (let index = 0; index < files.length; index++) {
-        const bitmap = await decodes.run(priority, signal, () => backend.decode(bodies[index].bytes, representation.mimeType));
+        const bitmap = await decodes.run(priority, signal, () => backend.decode(bodies[index].bytes, representation.mimeType)).catch(error => {
+          // A kept file the browser cannot decode is damaged: the next load asks the network for it.
+          if (fromSaved.has(files[index].url) && !signal.aborted) saved!.forget(files[index].url);
+          throw error;
+        });
         bitmaps.push(bitmap);
         if (signal.aborted) throw abortError(signal);
       }
@@ -486,6 +527,8 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
         largestResponseBytes,
         rejectedResponses,
         transferredBytes,
+        reusedFiles,
+        reusedBytes,
       };
     },
     dispose(): void {

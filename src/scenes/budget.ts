@@ -25,8 +25,9 @@ export function rgba8Bytes(width: number, height: number, levels = mipLevelCount
 /**
  * Where a tiled cube's tiles go: one atlas of `slots` stored tiles,
  * `perRow` to a row, as many as `memoryBytes` holds within the device's
- * largest texture side. Slot columns and rows are bytes in the display
- * table, so neither passes 255. Null when not even one tile fits.
+ * largest texture side, and never more than the cube has tiles. Slot columns
+ * and rows are bytes in the display table, so neither passes 255. Null when
+ * not even one tile fits.
  */
 export interface TileAtlasLayout {
   stored: number;
@@ -45,7 +46,8 @@ export function tileAtlasLayout(representation: Pick<ResolvedTiledCube, "tileSiz
   const stored = representation.tileSize + 2 * representation.gutter;
   const tileBytes = BYTES_PER_TEXEL * stored * stored;
   const aSide = Math.min(MOST_SLOTS_A_SIDE, Math.floor(maxTextureSide / stored));
-  const wanted = Math.floor(memoryBytes / tileBytes);
+  // A slot for every tile of every level is all a cube can use: then nothing is ever evicted.
+  const wanted = Math.min(Math.floor(memoryBytes / tileBytes), tiledCubeTileCount(representation));
   if (aSide < 1 || wanted < 1) return null;
   const perRow = Math.min(aSide, Math.ceil(Math.sqrt(wanted)));
   const rows = Math.min(aSide, Math.ceil(wanted / perRow));
@@ -55,9 +57,11 @@ export function tileAtlasLayout(representation: Pick<ResolvedTiledCube, "tileSiz
   return { stored, slots, perRow, width: perRow * stored, height: rows * stored, gpuBytes: BYTES_PER_TEXEL * perRow * stored * rows * stored + tableBytes };
 }
 
-/** A tiled cube's tile count: 6 · Σ 4^level. */
-export function tiledCubeTileCount(representation: Pick<ResolvedTiledCube, "levelBytes">): number {
-  return 6 * representation.levelBytes.reduce((sum, _bytes, level) => sum + 4 ** level, 0);
+/** A tiled cube's tile count: 6 · Σ 4^level, over the levels from one tile a face to `faceSize`. */
+export function tiledCubeTileCount(representation: Pick<ResolvedTiledCube, "tileSize" | "faceSize">): number {
+  let count = 0;
+  for (let cells = representation.faceSize / representation.tileSize; cells >= 1; cells /= 2) count += 6 * cells * cells;
+  return count;
 }
 
 /**
