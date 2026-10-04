@@ -6,6 +6,7 @@
 import type { CubeFaceName } from "./panoramaMath";
 import { CUBE_FACE_NAMES } from "./panoramaMath";
 import {
+  PREVIEW_SHEETS_EXTENSION,
   SCENE_FORMAT,
   SCENE_FORMAT_VERSION,
   type AttributionRecord,
@@ -166,6 +167,31 @@ class Checker {
   }
 }
 
+/**
+ * Checks what a scene can do without: a failure is a warning that says what is
+ * left unused, and the scene still loads. Preview sheets are checked with it,
+ * since every cube in one has its own files.
+ */
+class OptionalChecker extends Checker {
+  private readonly into: Checker;
+  private readonly unused: string;
+
+  constructor(into: Checker, unused: string) {
+    super();
+    this.into = into;
+    this.unused = unused;
+  }
+
+  override fail(path: string, message: string): void {
+    super.fail(path, message);
+    this.into.warn(path, `${message}; ${this.unused}`);
+  }
+
+  override warn(path: string, message: string): void {
+    this.into.warn(path, message);
+  }
+}
+
 function resolveUrl(checker: Checker, value: unknown, path: string, base: URL | null): string | null {
   if (typeof value !== "string" || value.length === 0) {
     checker.fail(path, "must be a URL");
@@ -242,6 +268,7 @@ const MOST_TILE_LEVELS = 8;
 function checkSheet(checker: Checker, value: unknown, path: string, base: URL | null): SheetRecord | null {
   const record = checker.record(value, path);
   if (!record) return null;
+  const problems = checker.errors.length;
   checker.keys(record, path, ["id", "revision", "mimeType", "width", "height", "encodedBytes", "url"]);
   const id = checker.id(record.id, `${path}.id`);
   const revision = checker.text(record.revision, `${path}.revision`);
@@ -250,7 +277,8 @@ function checkSheet(checker: Checker, value: unknown, path: string, base: URL | 
   const height = checker.positiveInteger(record.height, `${path}.height`);
   const encodedBytes = checker.positiveInteger(record.encodedBytes, `${path}.encodedBytes`);
   const url = resolveUrl(checker, record.url, `${path}.url`, base);
-  if (!id || !revision || !mimeType || !width || !height || !encodedBytes || !url) return null;
+  // A property this loader does not know may change what the sheet means, so the sheet is not one it reads.
+  if (checker.errors.length > problems || !id || !revision || !mimeType || !width || !height || !encodedBytes || !url) return null;
   return { id, revision, mimeType, width, height, encodedBytes, url };
 }
 
@@ -258,13 +286,14 @@ function checkSheet(checker: Checker, value: unknown, path: string, base: URL | 
 function checkSheetPlace(checker: Checker, value: unknown, path: string, faceSize: number | null, sheets: ReadonlyMap<string, SheetRecord>): ResolvedSheetPlace | null {
   const record = checker.record(value, path);
   if (!record) return null;
+  const problems = checker.errors.length;
   checker.keys(record, path, ["id", "x", "y"]);
   const id = checker.id(record.id, `${path}.id`);
   const x = checker.nonNegativeInteger(record.x, `${path}.x`);
   const y = checker.nonNegativeInteger(record.y, `${path}.y`);
   const sheet = id ? sheets.get(id) : undefined;
   if (id && !sheet) checker.fail(`${path}.id`, `names "${id}", which is not a sheet of this scene`);
-  if (!sheet || x === null || y === null || !faceSize) return null;
+  if (checker.errors.length > problems || !sheet || x === null || y === null || !faceSize) return null;
   if (x + CUBE_FACE_NAMES.length * faceSize > sheet.width || y + faceSize > sheet.height) {
     checker.fail(path, `puts six ${faceSize} px faces at (${x}, ${y}), outside the ${sheet.width} × ${sheet.height} px sheet "${sheet.id}"`);
     return null;
@@ -282,7 +311,7 @@ function checkRepresentation(checker: Checker, value: unknown, path: string, bas
   }
   const projection = checker.oneOf(record.projection, `${path}.projection`, PROJECTIONS);
   const common = ["id", "role", "projection", "mimeType", "encodedBytes", "extensions"];
-  checker.keys(record, path, projection === "cube" ? [...common, "faceSize", "faces", "sheet"]
+  checker.keys(record, path, projection === "cube" ? [...common, "faceSize", "faces"]
     : projection === "tiled-cube" ? [...common, "warp", "faceSize", "tileSize", "gutter", "levelBytes", "url"]
       : [...common, "width", "height", "url"]);
   const id = checker.id(record.id, `${path}.id`);
@@ -302,7 +331,10 @@ function checkRepresentation(checker: Checker, value: unknown, path: string, bas
         if (url) resolved[face] = url;
       }
     }
-    const sheet = record.sheet === undefined ? null : checkSheetPlace(checker, record.sheet, `${path}.sheet`, faceSize, sheets);
+    // Its place in a preview sheet. A place that is wrong is left unused: the six files above are the same picture.
+    const place = extensions[PREVIEW_SHEETS_EXTENSION];
+    const sheet = place === undefined ? null
+      : checkSheetPlace(new OptionalChecker(checker, "this cube loads from its own files"), place, `${path}.extensions.${PREVIEW_SHEETS_EXTENSION}`, faceSize, sheets);
     if (!id || !role || !mimeType || !encodedBytes || !faceSize || Object.keys(resolved).length !== 6) return null;
     return { id, role, projection, mimeType, encodedBytes, faceSize, faces: resolved as Record<CubeFaceName, string>, ...(sheet ? { sheet } : {}), ...(Object.keys(extensions).length ? { extensions } : {}) };
   }
@@ -576,8 +608,6 @@ export function validateScene(input: unknown, options: ValidateSceneOptions = {}
   const countOf = (value: unknown): number => (Array.isArray(value) ? value.length : 0);
   if (countOf(root.entities) > limits.entities) checker.fail("$.entities", `has ${countOf(root.entities)} entities, over the limit of ${limits.entities} (scene.entityLimit)`);
   if (countOf(root.assets) > limits.assets) checker.fail("$.assets", `has ${countOf(root.assets)} assets, over the limit of ${limits.assets} (scene.assetLimit)`);
-  // A sheet holds at least one cube, so a scene has no use for more sheets than assets.
-  if (countOf(root.sheets) > limits.assets) checker.fail("$.sheets", `has ${countOf(root.sheets)} sheets, over the limit of ${limits.assets} (scene.assetLimit)`);
   const linkCount = Array.isArray(root.entities)
     ? root.entities.reduce((sum: number, entity) => sum + (isRecord(entity) && Array.isArray(entity.links) ? entity.links.length : 0), 0)
     : 0;
@@ -589,13 +619,13 @@ export function validateScene(input: unknown, options: ValidateSceneOptions = {}
     try { base = new URL(String(options.baseUrl)); } catch { checker.fail("$", `the base URL ${String(options.baseUrl)} is not a URL`); }
   }
 
-  checker.keys(root, "$", ["format", "version", "id", "revision", "title", "requiredExtensions", "extensions", "assets", "sheets", "entities", "groups", "initialPanorama", "overview", "markerStyle"]);
+  checker.keys(root, "$", ["format", "version", "id", "revision", "title", "requiredExtensions", "extensions", "assets", "entities", "groups", "initialPanorama", "overview", "markerStyle"]);
   const sceneStyle = root.markerStyle === undefined ? {} : checkMarkerStyle(checker, root.markerStyle, "$.markerStyle");
   const id = checker.id(root.id, "$.id");
   const revision = checker.text(root.revision, "$.revision");
   const title = checker.text(root.title, "$.title");
   const extensions = checker.extensions(root.extensions, "$.extensions");
-  const supported = new Set(options.supportedExtensions ?? []);
+  const supported = new Set([PREVIEW_SHEETS_EXTENSION, ...(options.supportedExtensions ?? [])]);
   if (root.requiredExtensions !== undefined) {
     (checker.array(root.requiredExtensions, "$.requiredExtensions") ?? []).forEach((name, index) => {
       const path = `$.requiredExtensions[${index}]`;
@@ -605,14 +635,22 @@ export function validateScene(input: unknown, options: ValidateSceneOptions = {}
     });
   }
 
-  // Before the assets, whose cubes name their places in them.
+  // The preview sheets, before the assets, whose cubes name their places in them. A sheet that is wrong is
+  // left unused, with a warning, and its cubes load from their own files.
   const sheets = new Map<string, SheetRecord>();
-  if (root.sheets !== undefined) {
-    (checker.array(root.sheets, "$.sheets") ?? []).forEach((entry, index) => {
-      const sheet = checkSheet(checker, entry, `$.sheets[${index}]`, base);
+  const sheetsExtension = extensions[PREVIEW_SHEETS_EXTENSION];
+  if (sheetsExtension !== undefined) {
+    const path = `$.extensions.${PREVIEW_SHEETS_EXTENSION}`;
+    const optional = new OptionalChecker(checker, "this preview sheet is not used");
+    optional.keys(sheetsExtension, path, ["sheets"]);
+    const listed = optional.array(sheetsExtension.sheets, `${path}.sheets`) ?? [];
+    // A sheet holds at least one cube, so a scene has no use for more sheets than assets.
+    if (listed.length > limits.assets) optional.fail(`${path}.sheets`, `has ${listed.length} sheets, over the limit of ${limits.assets} (scene.assetLimit)`);
+    else listed.forEach((entry, index) => {
+      const sheet = checkSheet(optional, entry, `${path}.sheets[${index}]`, base);
       if (!sheet) return;
-      if (sheets.has(sheet.id)) checker.fail(`$.sheets[${index}].id`, `repeats sheet id "${sheet.id}"`);
-      sheets.set(sheet.id, sheet);
+      if (sheets.has(sheet.id)) optional.fail(`${path}.sheets[${index}].id`, `repeats sheet id "${sheet.id}"`);
+      else sheets.set(sheet.id, sheet);
     });
   }
 
