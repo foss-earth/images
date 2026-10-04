@@ -2,8 +2,9 @@
  * Loads panorama representations within the user's budgets (§4): bounded
  * requests, header-checked decodes and chunked uploads, each reserved
  * before it is spent and released exactly once. Sources are shared and
- * reference counted; unreferenced ones stay for reuse until a reservation
- * needs their room, least recently used first.
+ * reference counted; unreferenced ones stay for reuse, as many as the kept
+ * allowance holds, until a reservation needs their room, least recently used
+ * first.
  *
  * Nothing here draws. The GPU side is injected, so the accounting is tested
  * without a device.
@@ -65,6 +66,8 @@ export interface ResourceSettings {
   immersionWidth: number;
   /** A tiled cube's atlas: `tileMemoryMiB`. */
   tileMemoryBytes: number;
+  /** GPU bytes that sources nobody holds may keep for a quick return: `keptGpuMiB`. */
+  keptBytes: number;
   /** Whether a cube with a place in a preview sheet loads from the sheet: `previewSheets`. */
   previewSheets: boolean;
 }
@@ -108,6 +111,9 @@ export interface ResourceStats {
   reusedBytes: number;
   /** Cubes whose faces came out of a preview sheet, not their own six files. */
   cubesFromSheets: number;
+  /** Sources nobody holds that stay on the GPU for a quick return, and their bytes. */
+  keptSources: number;
+  keptBytes: number;
 }
 
 /** Download bytes for one representation; cube faces share one total. */
@@ -198,12 +204,25 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
   let reusedBytes = 0;
   let cubesFromSheets = 0;
 
+  /** Loaded sources nobody holds, least recently used first. */
+  const idleSources = (): Entry<Texture>[] => [...entries.values()].filter(entry => entry.refs === 0 && entry.waiting === 0 && entry.texture).sort((a, b) => a.lastUsed - b.lastUsed);
+
   /** Frees unreferenced sources, least recently used first, until `bytes` fits. */
   function makeRoom(pool: PoolName, bytes: number, overlap: boolean): void {
     if (pool !== "sourceGpu") return;
-    const idle = [...entries.values()].filter(entry => entry.refs === 0 && entry.waiting === 0 && entry.texture).sort((a, b) => a.lastUsed - b.lastUsed);
-    for (const entry of idle) {
+    for (const entry of idleSources()) {
       if (pools.fits(pool, bytes, { overlap })) return;
+      evict(entry);
+    }
+  }
+
+  /** Frees unreferenced sources, least recently used first, until what they keep is within `keptBytes`. */
+  function trimKept(): void {
+    const idle = idleSources();
+    let kept = idle.reduce((sum, entry) => sum + (entry.gpu?.bytes ?? 0), 0);
+    for (const entry of idle) {
+      if (kept <= settings.keptBytes) return;
+      kept -= entry.gpu?.bytes ?? 0;
       evict(entry);
     }
   }
@@ -579,8 +598,11 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
         if (settled) return;
         settled = true;
         current.waiting -= 1;
-        // No one else wants an unfinished load: stop it.
-        if (current.waiting === 0 && current.refs === 0 && !current.texture) evict(current);
+        // No one else wants an unfinished load: stop it. A finished one is kept, within its allowance.
+        if (current.waiting === 0 && current.refs === 0) {
+          if (!current.texture) evict(current);
+          else trimKept();
+        }
         reject(abortError(options.signal!));
       };
       options.signal?.addEventListener("abort", onAbort, { once: true });
@@ -600,6 +622,8 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
             released = true;
             current.refs -= 1;
             current.lastUsed = ++tick;
+            // Nobody shows it now: it stays on the GPU only within what may be kept.
+            if (current.refs === 0) trimKept();
           },
         });
       }, error => {
@@ -660,6 +684,7 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
       const over = pools.setLimits(next.limits);
       // Lowering a budget evicts what is idle; what is in use stays until released.
       if (over.includes("sourceGpu")) makeRoom("sourceGpu", 0, false);
+      trimKept();
       requests.pump();
       decodes.pump();
     },
@@ -670,6 +695,7 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
     },
     stats(): ResourceStats {
       const values = [...entries.values()];
+      const kept = idleSources();
       return {
         pools: pools.stats(),
         cachedSources: values.filter(entry => entry.texture).length,
@@ -684,6 +710,8 @@ export function createPanoramaResources<Texture extends GpuSource>(backend: Reso
         reusedFiles,
         reusedBytes,
         cubesFromSheets,
+        keptSources: kept.length,
+        keptBytes: kept.reduce((sum, entry) => sum + (entry.gpu?.bytes ?? 0), 0),
       };
     },
     dispose(): void {
@@ -721,6 +749,7 @@ export function resourceSettingsFrom(read: (id: string) => unknown, immersionWid
     timeoutMs: number("scene.panorama.requestTimeout") * 1000,
     immersionWidth,
     tileMemoryBytes: number("scene.panorama.tileMemoryMiB") * MIB,
+    keptBytes: number("scene.panorama.keptGpuMiB") * MIB,
     previewSheets: read("scene.panorama.previewSheets") !== false,
   };
 }
