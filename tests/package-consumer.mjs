@@ -1,0 +1,41 @@
+import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, readFileSync, writeFileSync, copyFileSync } from "node:fs";
+import path from "node:path";
+import { createHash } from "node:crypto";
+import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
+
+const root = fileURLToPath(new URL("../", import.meta.url));
+const output = path.join(root, "build", "consumers", new Date().toISOString().replaceAll(/[:.]/g, "-"));
+const artifacts = path.join(output, "artifacts"), workspace = path.join(output, "workspace");
+mkdirSync(artifacts, { recursive: true }); mkdirSync(workspace, { recursive: true });
+const cache = path.join(root, "build", "npm-cache");
+const npm = args => execFileSync("npm", [...args, "--cache", cache], { cwd: root, encoding: "utf8" });
+const packed = JSON.parse(npm(["pack", "--json", "--ignore-scripts", "--pack-destination", artifacts]))[0];
+const archive = path.join(artifacts, packed.filename);
+const require = createRequire(import.meta.url);
+const deps = [], pins = {};
+for (const name of ["jpeg-js", "@types/node", "undici-types"]) {
+  const metadata = require.resolve(`${name}/package.json`);
+  const info = JSON.parse(readFileSync(metadata, "utf8")); pins[name] = info.version;
+  const packedDependency = JSON.parse(npm(["pack", path.dirname(metadata), "--json", "--ignore-scripts", "--pack-destination", artifacts]))[0];
+  deps.push(path.join(artifacts, packedDependency.filename));
+}
+assert.equal(pins["jpeg-js"], "0.4.4");
+writeFileSync(path.join(workspace, "package.json"), JSON.stringify({ name: "images-artifact-consumer", version: "1.0.0", private: true, type: "module" }));
+const install = execFileSync("npm", ["install", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", "--cache", cache, archive, ...deps], { cwd: workspace, encoding: "utf8" });
+writeFileSync(path.join(output, "install.log"), install);
+copyFileSync(path.join(root, "tests", "installed-consumer.mjs"), path.join(workspace, "consumer.mjs"));
+copyFileSync(path.join(root, "tests", "minimal-consumer.ts"), path.join(workspace, "consumer.ts"));
+writeFileSync(path.join(workspace, "node-consumer.ts"), 'import { encodePng, decodePng, resizeArea } from "@foss-earth/images/node";\nconst bytes = encodePng({ width: 2, height: 1, rgb: new Uint8Array(6) });\nconst rgba = decodePng(bytes).rgba;\nconst resized = resizeArea({ width: 2, height: 1, data: new Float32Array(6) }, 1, 1);\nconsole.log(rgba, resized);\n');
+writeFileSync(path.join(workspace, "tsconfig.json"), JSON.stringify({ compilerOptions: { target: "ES2023", module: "NodeNext", moduleResolution: "NodeNext", strict: true, skipLibCheck: false, noEmit: true, incremental: true, tsBuildInfoFile: "node_modules/.tmp/consumer.tsbuildinfo", types: ["node"] }, files: ["consumer.ts", "node-consumer.ts"] }, null, 2));
+const compiler = require.resolve("typescript/bin/tsc");
+const typed = execFileSync(process.execPath, [compiler, "-p", "tsconfig.json"], { cwd: workspace, encoding: "utf8" });
+writeFileSync(path.join(output, "typecheck.log"), typed);
+const run = execFileSync(process.execPath, ["consumer.mjs"], { cwd: workspace, encoding: "utf8" });
+writeFileSync(path.join(output, "consumer.log"), run);
+for (const file of packed.files) assert(!file.path.includes("node_modules/"), "Archive contains a checkout link");
+const receipt = { package: packed.name, version: packed.version, archive: path.relative(root, archive), sha256: createHash("sha256").update(readFileSync(archive)).digest("hex"), files: packed.files.map(file => file.path), dependencyPins: pins, checks: ["fresh offline npm install; ancestor runtime imports rejected", "root/browser/node public declarations", "imports without eager browser or GPU access", "JPEG/PNG and linear-light round trip", "one shared budget and disposal"], environment: { node: process.version, platform: process.platform, arch: process.arch }, result: "passed" };
+writeFileSync(path.join(output, "receipt.json"), JSON.stringify(receipt, null, 2) + "\n");
+console.log(JSON.stringify({ ...receipt, output }));

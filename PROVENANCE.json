@@ -1,0 +1,177 @@
+{
+  "schemaVersion": 1,
+  "repository": "foss-earth/images",
+  "sourceRepository": "foss-earth/foss-earth.github.io",
+  "sourceCommit": "90e23b3ee96f53ec5900afc5991a21fffa58649d",
+  "lineage": "Path-filtered clean source ancestry imported; SOURCE_LINEAGE.json retains original-to-clean-to-filtered marks and verified identical human author/committer headers. Reviewed destination transformations prepared; common full-ref audit and publication admission remain pending.",
+  "license": "AGPL-3.0-only",
+  "dirtyInputsExcluded": [
+    "package.json",
+    "src/sky/atmosphere.ts",
+    "src/terrain/physicalHeight.ts",
+    "src/weather/"
+  ],
+  "files": [
+    {
+      "source": "src/scenes/budget.ts",
+      "sourceSha256": "bad5aa6efb442860c9f482d52464ef71cb03fd6710457774e041df46e38898fc",
+      "destination": "src/bytes.ts",
+      "sha256": "95bb8dd1afff67304fdaa16e71742599e07158ca0de3445a2338ffc555e747d8",
+      "sourceBlob": "e90822ddd01fcc6b7ed137d98960e61d600400f2"
+    },
+    {
+      "source": "src/scenes/budget.ts",
+      "sourceSha256": "bad5aa6efb442860c9f482d52464ef71cb03fd6710457774e041df46e38898fc",
+      "destination": "src/pools.ts",
+      "sha256": "29619c83e77fc91e66b3f55fb07236b7fdcb2b8ab956b4122904cbf655d195c4",
+      "sourceBlob": "e90822ddd01fcc6b7ed137d98960e61d600400f2"
+    },
+    {
+      "source": "src/scenes/imageHeaders.ts",
+      "sourceSha256": "3c415a91d601eccb608fd683e29449ea00b18370b515c622788e3612a411136b",
+      "destination": "src/headers.ts",
+      "sha256": "2fa7b21c63b443b252a0df25ffbcf9befa36eb3019231ee761d0f5bb26bcd209",
+      "adaptation": "Bounds checks before EXIF inspection/PNG allocation; regression covers truncated chunks and wrong SOF segment length.",
+      "sourceBlob": "088a60a5b96d2370b2c914cf7b2b306a1d704718"
+    },
+    {
+      "source": "src/scenes/imageHeaders.test.ts",
+      "sourceSha256": "592c56693e264e23be3cd444dfdff554201cd043f8876aa8060ae09e268a40ed",
+      "destination": "src/headers.test.ts",
+      "sha256": "2495acacc1681c67c6b215640ec79ca1be3f3dc586fa6876007d5c147ddc9435",
+      "sourceBlob": "0c8d700cbee26c7ebed5eaa22ef05e88d3fdb478"
+    },
+    {
+      "source": "public/examples/panorama-scenes/media/cardinal-grid/preview-64/px.jpg",
+      "destination": "fixtures/media/cardinal-grid/preview-64/px.jpg",
+      "sha256": "be7020ff76da8b4968c5c445a6889da2a0e429a733108c2da5dfac574a8d7bd2",
+      "sourceSha256": "be7020ff76da8b4968c5c445a6889da2a0e429a733108c2da5dfac574a8d7bd2",
+      "sourceBlob": "df6b2a4ccea5292c7218cbbd8531475bec4ee85f"
+    },
+    {
+      "source": "public/examples/panorama-scenes/media/cardinal-grid/immersion-1024.jpg",
+      "destination": "fixtures/media/cardinal-grid/immersion-1024.jpg",
+      "sha256": "873e50ac8bddaac82fe7ef09f657ab91b799ac8c4eff22d1c8fa6257a473867f",
+      "sourceSha256": "873e50ac8bddaac82fe7ef09f657ab91b799ac8c4eff22d1c8fa6257a473867f",
+      "sourceBlob": "0aaee12697a491d15924681778e6f68d200593e2"
+    },
+    {
+      "source": "src/scenes/mediaStore.ts",
+      "sourceSha256": "cbb77d953e8df781a78116dc53b7a36dbe7c3f20a0f3d96e6ea2cefb18289029",
+      "destination": "src/mediaStore.ts",
+      "sha256": "2c44948d8c0524e12773514ed1858f2dc1697ee61997f0518f0e79353acec718",
+      "sourceBlob": "9241128b88f5a9dea86de0ebcc8d14eea2010df7"
+    },
+    {
+      "source": "src/scenes/mediaStore.ts",
+      "sourceSha256": "cbb77d953e8df781a78116dc53b7a36dbe7c3f20a0f3d96e6ea2cefb18289029",
+      "destination": "src/browser/indexedDb.ts",
+      "sha256": "f7e23acdaf5627b69bb43617e72d44b761054d94e4a7cf568b1e2a6b1966f0f6",
+      "sourceBlob": "9241128b88f5a9dea86de0ebcc8d14eea2010df7"
+    },
+    {
+      "source": "src/scenes/mediaStore.test.ts",
+      "sourceSha256": "8b5fcc3eb8f4a219d803f45c64bb96f7e2e4d1c08eade8b0d49beaac0d833e5f",
+      "destination": "src/mediaStore.test.ts",
+      "sha256": "d808e9fbd422ed9a2b80464dac11a3860337b503e65a1470bacb9c539f109ed6",
+      "sourceBlob": "9991a1715bab5f90a340e828cf758f4161bbf2e2"
+    },
+    {
+      "source": "scripts/lib/panoramaImage.mjs",
+      "sourceSha256": "4aeac1958ee2ff3417c3b84c785c9ee206fa9fcad2fd1fd782288652ab19d5e4",
+      "destination": "node/codecs.mjs",
+      "sha256": "8aac3690f195285bbc8166d5224f5690588d48ce9659ddcb9b2daa1f3e65a7b5",
+      "sourceBlob": "4e5b38536812b9505cdabb8b506eb06da32f654d"
+    },
+    {
+      "source": "LICENSE",
+      "sourceSha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
+      "destination": "LICENSE",
+      "sha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
+      "sourceBlob": "be3f7b28e564e7dd05eaf59d64adba1a4065ac0e"
+    },
+    {
+      "source": "scripts/lib/panoramaImage.mjs",
+      "sourceSha256": "4aeac1958ee2ff3417c3b84c785c9ee206fa9fcad2fd1fd782288652ab19d5e4",
+      "destination": "src/color.ts",
+      "sha256": "6a61ee7b81b5b565aed3755f7c1243bbc2fc080c9382d548b4e405ec1c9ed08f",
+      "adaptation": "Buffer-independent color/orientation subset; spatial sampling/preparation excluded.",
+      "sourceBlob": "4e5b38536812b9505cdabb8b506eb06da32f654d"
+    },
+    {
+      "source": "src/scenes/panoramaResources.ts",
+      "sourceSha256": "d1311f2eb3af959ad612b9eb53de30a0fc9841f3fce8b7772dcb08e84451e13e",
+      "destination": "src/session.ts",
+      "sha256": "e0cb9979a35ccfe314b5e9d34cb9acd50d7e7b7e8c71a282cfb35013bea8137f",
+      "adaptation": "Common limiter isolated; scoped broker/lifecycle added as extraction contract.",
+      "sourceBlob": "d9791774a301fed0bd074f5ed98f94956cd5edf2"
+    },
+    {
+      "source": "src/scenes/panoramaResources.ts",
+      "sourceSha256": "d1311f2eb3af959ad612b9eb53de30a0fc9841f3fce8b7772dcb08e84451e13e",
+      "destination": "src/browser/transport.ts",
+      "sha256": "68cc27f1887afb319f836236b234fb494b3a726b77eff882048c51569392b38c",
+      "adaptation": "Bounded transfer/decode responsibilities isolated behind shared broker; copy staging charged explicitly.",
+      "sourceBlob": "d9791774a301fed0bd074f5ed98f94956cd5edf2"
+    },
+    {
+      "source": "src/test/memoryMediaBackend.ts",
+      "sourceSha256": "10ca908da8d67ab2b1b7d17005ab044617e0568263c2b39c0770af12d58b8151",
+      "destination": "src/test/memoryMediaBackend.ts",
+      "sha256": "2e5efeb169368d6d2307fd16e221428735b4f9f26efa17c31beb7d1d7dc8bf65",
+      "adaptation": "Existing backend fixture, import redirected to public media-store core.",
+      "sourceBlob": "1b07121325713e92b6917a7bb620846b2cc1dfdc"
+    },
+    {
+      "source": "src/scenes/panoramaMath.ts",
+      "sourceSha256": "071a5fbcb150ace6d3f26fd7164ed06924ad5b4c0b5ce5c8b8ea854593660e68",
+      "destination": "src/vectors.ts",
+      "sha256": "f1ba481146129f4e42ee0fb78aa4fc07957a89167c7caf071eed3c4039de7cf5",
+      "adaptation": "Only common vectors/matrices/image pose, no geographic/geodetic/placement functions.",
+      "sourceBlob": "c4193c7932266639ec58e72000a2edb38f22c705"
+    },
+    {
+      "source": "scripts/lib/panoramaImage.mjs",
+      "sourceSha256": "4aeac1958ee2ff3417c3b84c785c9ee206fa9fcad2fd1fd782288652ab19d5e4",
+      "destination": "src/resample.ts",
+      "sha256": "f5bf6e79f6cadacb4871d8d85e83d35f105a5fb56510654db832c8d6a30c4de3",
+      "adaptation": "Linear-light area resize typed and isolated; Node adapter reexports canonical pure implementation.",
+      "sourceBlob": "4e5b38536812b9505cdabb8b506eb06da32f654d"
+    },
+    {
+      "source": "src/scenes/validateScene.ts",
+      "sourceSha256": "c3666bdfbe6b27b59229652a1b784861268b789db9a364cc0ebfc53c9962e0d4",
+      "destination": "src/records.ts",
+      "sha256": "a48784c8df12d98d2fcb8b399231507e787c73cba6daf68fcbe6180744205bc1",
+      "adaptation": "Only common image record checks and safe URL resolution; spatial and scene checks omitted.",
+      "sourceBlob": "d864e4825e9809efb29f162b76e66d7869accecd"
+    },
+    {
+      "source": "src/scenes/panoramaResources.ts",
+      "sourceSha256": "d1311f2eb3af959ad612b9eb53de30a0fc9841f3fce8b7772dcb08e84451e13e",
+      "destination": "src/browser/loadPorts.ts",
+      "sha256": "eab7cc99b51b665695770a7b9ca33f843b60a3eb07998630fb95485c2f402670",
+      "adaptation": "Structural common acquisition/decode/readiness ports; renderer remains host-owned.",
+      "sourceBlob": "d9791774a301fed0bd074f5ed98f94956cd5edf2"
+    },
+    {
+      "source": "NOTICE",
+      "sourceSha256": "323da85db96d02ed0cf48db889efa184037f538f002e868aeeff396ebb44a993",
+      "destination": "NOTICE",
+      "sha256": "323da85db96d02ed0cf48db889efa184037f538f002e868aeeff396ebb44a993",
+      "sourceBlob": "cd6a1d92cce505eaeea37e9726a2f98a0a61a12d"
+    }
+  ],
+  "capabilities": "Common records/validation/vector pose/linear resampling, headers, exact byte accounting, resource pools/session cancellation, media cache and separate JPEG/PNG Node normalization; no representation catalogue or GPU initialization.",
+  "policyPin": null,
+  "assets": {
+    "fixtures/media/cardinal-grid": "Synthetic N/E/S/W reference panorama generated by committed Earth prepare-panorama tool. Original preparation metadata retained under fixtures/cardinal-provenance.json; no human photograph/license grant invented."
+  },
+  "pending": [
+    "domain validation/build/artifact",
+    "common CI caller/conformance",
+    "cleaned source lineage",
+    "consumer adoption",
+    "remote admission"
+  ]
+}

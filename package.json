@@ -1,0 +1,53 @@
+{
+  "name": "@foss-earth/images",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/foss-earth/images.git"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./browser": {
+      "types": "./dist/browser/index.d.ts",
+      "import": "./dist/browser/index.js"
+    },
+    "./node": {
+      "types": "./node/codecs.d.mts",
+      "import": "./node/codecs.mjs"
+    }
+  },
+  "files": [
+    "dist",
+    "node",
+    "LICENSE",
+    "PROVENANCE.json",
+    "README.md",
+    "NOTICE",
+    "SOURCE_LINEAGE.json"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --maxWorkers=50%",
+    "lint": "eslint src tests --cache --cache-strategy content --cache-location node_modules/.cache/eslint/",
+    "ci": "npm run typecheck && npm test && npm run lint && npm run build && npm run typecheck:consumer && npm run test:consumer",
+    "test:consumer": "node tests/package-consumer.mjs",
+    "typecheck:consumer": "tsc -p tests/tsconfig.json"
+  },
+  "dependencies": {
+    "jpeg-js": "0.4.4"
+  },
+  "devDependencies": {
+    "@types/node": "24.12.4",
+    "typescript": "5.9.3",
+    "vitest": "4.1.6",
+    "eslint": "9.39.4",
+    "typescript-eslint": "8.59.3"
+  }
+}

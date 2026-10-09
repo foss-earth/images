@@ -25,20 +25,24 @@ export function sniffImageKind(bytes: Uint8Array): ImageKind | null {
 
 function exifOrientation(bytes: Uint8Array, start: number, end: number): number | null {
   // "Exif\0\0", then a TIFF header.
-  if (end - start < 14 || String.fromCharCode(...bytes.subarray(start, start + 4)) !== "Exif") return null;
+  if (end - start < 14 || String.fromCharCode(...bytes.subarray(start, start + 6)) !== "Exif\0\0") return null;
   const tiff = start + 6;
+  if (!((bytes[tiff] === 0x49 && bytes[tiff + 1] === 0x49) || (bytes[tiff] === 0x4d && bytes[tiff + 1] === 0x4d))) return null;
   const little = bytes[tiff] === 0x49;
   const u16 = (at: number) => (little ? bytes[at] | (bytes[at + 1] << 8) : (bytes[at] << 8) | bytes[at + 1]);
   const u32 = (at: number) => (little
     ? (bytes[at] | (bytes[at + 1] << 8) | (bytes[at + 2] << 16)) + bytes[at + 3] * 0x1000000
     : bytes[at] * 0x1000000 + ((bytes[at + 1] << 16) | (bytes[at + 2] << 8) | bytes[at + 3]));
-  const ifd = tiff + u32(tiff + 4);
+  if (u16(tiff + 2) !== 42) return null;
+  const offset = u32(tiff + 4);
+  if (offset < 8) return null;
+  const ifd = tiff + offset;
   if (ifd + 2 > end) return null;
   const count = u16(ifd);
   for (let entry = 0; entry < count; entry++) {
     const at = ifd + 2 + entry * 12;
     if (at + 12 > end) return null;
-    if (u16(at) === 0x0112) return u16(at + 8);
+    if (u16(at) === 0x0112 && u16(at + 2) === 3 && u32(at + 4) === 1) return u16(at + 8);
   }
   return null;
 }
@@ -52,10 +56,11 @@ function jpegHeader(bytes: Uint8Array): ImageHeader | null {
     if (marker === 0xff) { at += 1; continue; }
     const length = (bytes[at + 2] << 8) | bytes[at + 3];
     const body = at + 4;
-    if (marker === 0xe1) orientation = exifOrientation(bytes, body, Math.min(bytes.length, at + 2 + length)) ?? orientation;
+    if (length < 2 || at + 2 + length > bytes.length) return null;
+    if (marker === 0xe1) orientation = exifOrientation(bytes, body, at + 2 + length) ?? orientation;
     // SOF0–SOF15, except DHT (C4), JPG (C8) and DAC (CC).
     if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
-      if (body + 5 > bytes.length) return null;
+      if (length < 7) return null;
       return { kind: "image/jpeg", height: (bytes[body + 1] << 8) | bytes[body + 2], width: (bytes[body + 3] << 8) | bytes[body + 4], orientation };
     }
     if (marker === 0xda) return null;
@@ -65,14 +70,17 @@ function jpegHeader(bytes: Uint8Array): ImageHeader | null {
 }
 
 function pngHeader(bytes: Uint8Array): ImageHeader | null {
-  if (bytes.length < 24 || String.fromCharCode(...bytes.subarray(12, 16)) !== "IHDR") return null;
+  if (bytes.length < 33 || String.fromCharCode(...bytes.subarray(12, 16)) !== "IHDR") return null;
   const u32 = (at: number) => bytes[at] * 0x1000000 + ((bytes[at + 1] << 16) | (bytes[at + 2] << 8) | bytes[at + 3]);
+  if (u32(8) !== 13) return null;
   let orientation: number | null = null;
   // An eXIf chunk may carry an orientation too.
   let at = 8;
   while (at + 12 <= bytes.length) {
     const length = u32(at);
     const type = String.fromCharCode(...bytes.subarray(at + 4, at + 8));
+    // Never allocate or inspect a chunk beyond the bytes actually received.
+    if (length > bytes.length - at - 12) return null;
     if (type === "eXIf") {
       const tiff = new Uint8Array(6 + length);
       tiff.set([0x45, 0x78, 0x69, 0x66, 0, 0]);

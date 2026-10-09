@@ -1,4 +1,4 @@
-import type { MediaGroupRecord, MediaStoreBackend, SavedFile } from "../scenes/mediaStore";
+import type { MediaGroupRecord, MediaStoreBackend, SavedFile } from "../mediaStore.js";
 
 /** The storage as a map, with a quota in bytes and a count of what each call did. */
 export function memoryBackend(options: { quotaBytes?: number } = {}) {

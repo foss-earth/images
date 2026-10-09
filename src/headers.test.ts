@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
-import { checkImage, readImageHeader } from "./imageHeaders";
+import { checkImage, readImageHeader } from "./headers.js";
 
-const media = new URL("../../public/examples/panorama-scenes/media/", import.meta.url);
+const media = new URL("../fixtures/media/", import.meta.url);
 const face = new Uint8Array(readFileSync(new URL("cardinal-grid/preview-64/px.jpg", media)));
 const whole = new Uint8Array(readFileSync(new URL("cardinal-grid/immersion-1024.jpg", media)));
 
@@ -42,5 +42,14 @@ describe("panorama image headers", () => {
   it("reads a PNG's size from IHDR", () => {
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 8, 0, 0, 0, 4, 0, 8, 6, 0, 0, 0, 0, 0, 0, 0]);
     expect(readImageHeader(png)).toEqual({ kind: "image/png", width: 2048, height: 1024, orientation: null });
+  });
+
+  it("rejects truncated chunks before trusting allocation lengths or stray SOF bytes", () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52, 0, 0, 0, 2, 0, 0, 0, 1, 8, 6, 0, 0, 0, 0, 0, 0, 0]);
+    const malformedExif = new Uint8Array([...png, 0xff, 0xff, 0xff, 0xff, 0x65, 0x58, 0x49, 0x66, 0, 0, 0, 0]);
+    expect(readImageHeader(malformedExif)).toBeNull();
+    expect(readImageHeader(png.subarray(0, 24))).toBeNull();
+    expect(readImageHeader(new Uint8Array([0xff, 0xd8, 0xff, 0xc0, 0, 2, 8, 0, 2, 0, 4]))).toBeNull();
+    expect(readImageHeader(new Uint8Array([0xff, 0xd8, 0xff, 0xe1, 0xff, 0xff, 1, 2]))).toBeNull();
   });
 });

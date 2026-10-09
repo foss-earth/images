@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createMediaStore, mediaGroup } from "./mediaStore";
-import { memoryBackend } from "../test/memoryMediaBackend";
+import { createMediaStore, mediaGroup } from "./mediaStore.js";
+import { memoryBackend } from "./test/memoryMediaBackend.js";
 
 const bytes = (length: number, fill = 7): Uint8Array => new Uint8Array(length).fill(fill);
 const MIB = 1024 * 1024;
