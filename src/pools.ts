@@ -19,6 +19,8 @@ export interface Reservation {
   /** Counted against the overlap cap too, until `settle` or release. */
   readonly overlap: boolean;
   readonly released: boolean;
+  /** Submitted GPU work/nonabortable decode retains its charge after owner cancellation. */
+  retain(): () => void;
   /** Grows or shrinks in place, if the pool allows it; a streamed body grows as it arrives. */
   resize(bytes: number): boolean;
   /** The outgoing source is gone: stop counting this against the overlap cap. */
@@ -30,6 +32,13 @@ export interface Reservation {
 export type ReserveResult =
   | { ok: true; reservation: Reservation }
   | { ok: false; pool: PoolName | "overlap"; reason: string };
+
+/** Admission failure, distinct from damaged bytes or a decoder failure. */
+export class ResourceCapacityError extends Error {
+  constructor(readonly pool: PoolName | "overlap", reason: string) {
+    super(reason); this.name = "ResourceCapacityError";
+  }
+}
 
 export interface PoolStats {
   limit: number;
@@ -48,6 +57,8 @@ export interface ResourcePools {
   setLimits(limits: PoolLimits): (PoolName | "overlap")[];
   /** Live reservations, for tests and the readings. */
   live(): readonly Reservation[];
+  /** Coalesced capacity increases; listeners must not throw and wake the existing host frame, never poll. */
+  subscribeAvailable(listener: () => void): () => void;
 }
 
 function format(bytes: number): string {
@@ -60,6 +71,16 @@ export function createResourcePools(initial: PoolLimits): ResourcePools {
   const peak: Record<PoolName | "overlap", number> = { sourceGpu: 0, decoded: 0, encoded: 0, uploadOutstanding: 0, overlap: 0 };
   let overlapReserved = 0;
   const live = new Set<Reservation>();
+  const available = new Set<() => void>();
+  let availabilityQueued = false;
+  const notifyAvailable = (): void => {
+    if (availabilityQueued || available.size === 0) return;
+    availabilityQueued = true;
+    queueMicrotask(() => {
+      availabilityQueued = false;
+      for (const listener of [...available]) if (available.has(listener)) listener();
+    });
+  };
 
   const fits = (pool: PoolName, bytes: number, overlap = false): { ok: true } | { ok: false; pool: PoolName | "overlap"; reason: string } => {
     if (!(bytes >= 0) || !Number.isFinite(bytes)) return { ok: false, pool, reason: `${bytes} is not a byte count` };
@@ -89,34 +110,50 @@ export function createResourcePools(initial: PoolLimits): ResourcePools {
       let current = bytes;
       let counted = overlap;
       let released = false;
+      let ownerReleased = false;
+      let holds = 0;
+      const finish = (): void => {
+        if (released || !ownerReleased || holds > 0) return;
+        released = true;
+        reserved[pool] -= current;
+        if (counted) overlapReserved -= current;
+        counted = false;
+        live.delete(reservation);
+        if (current > 0) notifyAvailable();
+      };
       const reservation: Reservation = {
         pool,
         label,
         get bytes() { return current; },
         get overlap() { return counted; },
         get released() { return released; },
+        retain() {
+          if (released || ownerReleased) throw new Error(`${label} has already been released by its owner.`);
+          holds += 1;
+          let held = true;
+          return () => { if (!held) return; held = false; holds -= 1; finish(); };
+        },
         resize(next) {
-          if (released || !(next >= 0) || !Number.isFinite(next)) return false;
+          if (ownerReleased || !(next >= 0) || !Number.isFinite(next)) return false;
           const delta = next - current;
           if (delta > 0 && !fits(pool, delta, counted).ok) return false;
           reserved[pool] += delta;
           if (counted) overlapReserved += delta;
           current = next;
           notePeak(pool);
+          if (delta < 0) notifyAvailable();
           return true;
         },
         settle() {
           if (released || !counted) return;
           counted = false;
           overlapReserved -= current;
+          if (current > 0) notifyAvailable();
         },
         release() {
-          if (released) return;
-          released = true;
-          reserved[pool] -= current;
-          if (counted) overlapReserved -= current;
-          counted = false;
-          live.delete(reservation);
+          if (ownerReleased) return;
+          ownerReleased = true;
+          finish();
         },
       };
       live.add(reservation);
@@ -135,11 +172,14 @@ export function createResourcePools(initial: PoolLimits): ResourcePools {
     },
     limits: () => ({ ...limits }),
     setLimits(next) {
+      const increased = Object.keys(limits).some(key => next[key as keyof PoolLimits] > limits[key as keyof PoolLimits]);
       limits = { ...next };
+      if (increased) notifyAvailable();
       const over: (PoolName | "overlap")[] = (["sourceGpu", "decoded", "encoded", "uploadOutstanding"] as const).filter(pool => reserved[pool] > limits[pool]);
       if (overlapReserved > limits.overlap) over.push("overlap");
       return over;
     },
     live: () => [...live],
+    subscribeAvailable(listener) { available.add(listener); return () => { available.delete(listener); }; },
   };
 }

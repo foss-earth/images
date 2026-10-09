@@ -1,0 +1,233 @@
+{
+  "schemaVersion": 1,
+  "repository": "foss-earth/images",
+  "sourceCommit": "90e23b3ee96f53ec5900afc5991a21fffa58649d",
+  "sourceTree": "c68d1fabd9fce19e255ea89c65502666d0f74a27",
+  "status": "SOURCE ONLY / UNRUN; newly selected paths require primary lineage/admission work",
+  "selectedOriginalPaths": [
+    {
+      "path": "LICENSE",
+      "sourceBlob": "be3f7b28e564e7dd05eaf59d64adba1a4065ac0e",
+      "sourceSha256": "0d96a4ff68ad6d4b6f1f30f713b18d5184912ba8dd389f86aa7710db079abcb0",
+      "bytes": 34523,
+      "destinations": [
+        "LICENSE"
+      ]
+    },
+    {
+      "path": "NOTICE",
+      "sourceBlob": "cd6a1d92cce505eaeea37e9726a2f98a0a61a12d",
+      "sourceSha256": "323da85db96d02ed0cf48db889efa184037f538f002e868aeeff396ebb44a993",
+      "bytes": 359,
+      "destinations": [
+        "NOTICE"
+      ]
+    },
+    {
+      "path": "public/examples/panorama-scenes/media/cardinal-grid/immersion-1024.jpg",
+      "sourceBlob": "0aaee12697a491d15924681778e6f68d200593e2",
+      "sourceSha256": "873e50ac8bddaac82fe7ef09f657ab91b799ac8c4eff22d1c8fa6257a473867f",
+      "bytes": 84980,
+      "destinations": [
+        "fixtures/media/cardinal-grid/immersion-1024.jpg"
+      ]
+    },
+    {
+      "path": "public/examples/panorama-scenes/media/cardinal-grid/preview-64/px.jpg",
+      "sourceBlob": "df6b2a4ccea5292c7218cbbd8531475bec4ee85f",
+      "sourceSha256": "be7020ff76da8b4968c5c445a6889da2a0e429a733108c2da5dfac574a8d7bd2",
+      "bytes": 1766,
+      "destinations": [
+        "fixtures/media/cardinal-grid/preview-64/px.jpg"
+      ]
+    },
+    {
+      "path": "scripts/lib/panoramaImage.mjs",
+      "sourceBlob": "4e5b38536812b9505cdabb8b506eb06da32f654d",
+      "sourceSha256": "4aeac1958ee2ff3417c3b84c785c9ee206fa9fcad2fd1fd782288652ab19d5e4",
+      "bytes": 25194,
+      "destinations": [
+        "node/codecs.mjs",
+        "src/color.ts",
+        "src/resample.ts"
+      ]
+    },
+    {
+      "path": "src/engine/babylon/imagery/imageryLoader.ts",
+      "sourceBlob": "3728f7099ffd19e70bce15cd7ab9a3913e2f9cae",
+      "sourceSha256": "b5dcfdfd5ca1fbf7bb1b2478e1bccacf7552e8f1718f3382c425960c1efb026f",
+      "bytes": 3986,
+      "destinations": [
+        "src/browser/transport.ts"
+      ]
+    },
+    {
+      "path": "src/engine/babylon/imagery/imageryPagePreparation.ts",
+      "sourceBlob": "713eb3ca59210f9b033c53e354ec011acc912e74",
+      "sourceSha256": "4d303139109abe921912decf8ff9c5271e5135c17384af1cbe0f80a20cb6b8f3",
+      "bytes": 2034,
+      "destinations": [
+        "src/browser/rgbaReadback.ts"
+      ]
+    },
+    {
+      "path": "src/engine/babylon/panorama/panoramaShaders.ts",
+      "sourceBlob": "c78ca8b124c65925fd9d07b481d5ebfa1a1e110b",
+      "sourceSha256": "85d6a817382c02849a96c45d4cd10a0dd86b54536828be18c6b5cc90c49fb425",
+      "bytes": 15207,
+      "destinations": [
+        "src/shaders.ts"
+      ]
+    },
+    {
+      "path": "src/engine/babylon/panorama/panoramaShadersWebGL.ts",
+      "sourceBlob": "129533f6e8a93ea1c76f8192f98d5d00c0ea5d71",
+      "sourceSha256": "c87f75894ae5a51a6d22a9fd972567d29ed699621dc1201966b2c01d6b2dec62",
+      "bytes": 14559,
+      "destinations": [
+        "src/shaders.ts"
+      ]
+    },
+    {
+      "path": "src/scenes/budget.ts",
+      "sourceBlob": "e90822ddd01fcc6b7ed137d98960e61d600400f2",
+      "sourceSha256": "bad5aa6efb442860c9f482d52464ef71cb03fd6710457774e041df46e38898fc",
+      "bytes": 13913,
+      "destinations": [
+        "src/bytes.ts",
+        "src/pools.ts"
+      ]
+    },
+    {
+      "path": "src/scenes/imageHeaders.test.ts",
+      "sourceBlob": "0c8d700cbee26c7ebed5eaa22ef05e88d3fdb478",
+      "sourceSha256": "592c56693e264e23be3cd444dfdff554201cd043f8876aa8060ae09e268a40ed",
+      "bytes": 3116,
+      "destinations": [
+        "src/headers.test.ts"
+      ]
+    },
+    {
+      "path": "src/scenes/imageHeaders.ts",
+      "sourceBlob": "088a60a5b96d2370b2c914cf7b2b306a1d704718",
+      "sourceSha256": "3c415a91d601eccb608fd683e29449ea00b18370b515c622788e3612a411136b",
+      "bytes": 5380,
+      "destinations": [
+        "src/headers.ts"
+      ]
+    },
+    {
+      "path": "src/scenes/mediaStore.test.ts",
+      "sourceBlob": "9991a1715bab5f90a340e828cf758f4161bbf2e2",
+      "sourceSha256": "8b5fcc3eb8f4a219d803f45c64bb96f7e2e4d1c08eade8b0d49beaac0d833e5f",
+      "bytes": 9779,
+      "destinations": [
+        "src/mediaStore.test.ts"
+      ]
+    },
+    {
+      "path": "src/scenes/mediaStore.ts",
+      "sourceBlob": "9241128b88f5a9dea86de0ebcc8d14eea2010df7",
+      "sourceSha256": "cbb77d953e8df781a78116dc53b7a36dbe7c3f20a0f3d96e6ea2cefb18289029",
+      "bytes": 21362,
+      "destinations": [
+        "src/mediaStore.ts",
+        "src/browser/indexedDb.ts"
+      ]
+    },
+    {
+      "path": "src/scenes/panoramaMath.ts",
+      "sourceBlob": "c4193c7932266639ec58e72000a2edb38f22c705",
+      "sourceSha256": "071a5fbcb150ace6d3f26fd7164ed06924ad5b4c0b5ce5c8b8ea854593660e68",
+      "bytes": 20181,
+      "destinations": [
+        "src/vectors.ts"
+      ]
+    },
+    {
+      "path": "src/scenes/panoramaResources.ts",
+      "sourceBlob": "d9791774a301fed0bd074f5ed98f94956cd5edf2",
+      "sourceSha256": "d1311f2eb3af959ad612b9eb53de30a0fc9841f3fce8b7772dcb08e84451e13e",
+      "bytes": 35875,
+      "destinations": [
+        "src/session.ts",
+        "src/browser/transport.ts",
+        "src/browser/loadPorts.ts",
+        "src/sourceCache.ts",
+        "src/browser/fileService.ts"
+      ]
+    },
+    {
+      "path": "src/scenes/validateScene.ts",
+      "sourceBlob": "d864e4825e9809efb29f162b76e66d7869accecd",
+      "sourceSha256": "c3666bdfbe6b27b59229652a1b784861268b789db9a364cc0ebfc53c9962e0d4",
+      "bytes": 42097,
+      "destinations": [
+        "src/records.ts"
+      ]
+    },
+    {
+      "path": "src/settings/catalogue/scenes.ts",
+      "sourceBlob": "cd175ed979ed93f29fd171388a49212766924278",
+      "sourceSha256": "e05cf3d5b6a02e72a390965bca7c2a950e75a2f7690ca905fcdc766f6c71dd5d",
+      "bytes": 39738,
+      "destinations": [
+        "src/settings.ts"
+      ]
+    },
+    {
+      "path": "src/test/memoryMediaBackend.ts",
+      "sourceBlob": "1b07121325713e92b6917a7bb620846b2cc1dfdc",
+      "sourceSha256": "10ca908da8d67ab2b1b7d17005ab044617e0568263c2b39c0770af12d58b8151",
+      "bytes": 2483,
+      "destinations": [
+        "src/test/memoryMediaBackend.ts"
+      ]
+    }
+  ],
+  "authoredSourceFiles": [
+    "node/codecs.d.mts",
+    "package.json",
+    "src/browser/fileService.test.ts",
+    "src/browser/index.ts",
+    "src/browser/indexedDb.test.ts",
+    "src/browser/rgbaReadback.test.ts",
+    "src/browser/transport.test.ts",
+    "src/color.test.ts",
+    "src/contracts.ts",
+    "src/index.ts",
+    "src/math.test.ts",
+    "src/pools.lifecycle.test.ts",
+    "src/session.test.ts",
+    "src/settings.test.ts",
+    "src/sourceCache.test.ts",
+    "src/test/indexedDbReadFixture.ts",
+    "tests/consumer/archive-closure.schema.json",
+    "tests/consumer/declaration-guard.mjs",
+    "tests/consumer/declaration-negative.mjs",
+    "tests/consumer/pure-consumer.mjs",
+    "tests/consumer/runtime-guard.mjs",
+    "tests/consumer/runtime-negative.mjs",
+    "tests/consumer/settings-runtime.mjs",
+    "tests/installed-consumer.mjs",
+    "tests/minimal-consumer.ts",
+    "tests/node-consumer.ts",
+    "tests/package-consumer.mjs",
+    "tests/settings-consumer.ts",
+    "tests/shaders-consumer.ts",
+    "tests/tsconfig.json",
+    "vitest.config.ts"
+  ],
+  "componentOwnershipNotes": [
+    "ImageryLoader complete behavior/worker/missing policy remains Engine; images selects only generic status information and readback fragment.",
+    "Dirty physicalHeight/weather/atmosphere and canonical source/package/lock inputs excluded; no new source ancestry claimed.",
+    "Typed dimension observations stay pure common metadata; only Engine chooses missing/retry policy. Existing cached header forget/refetch and native decode-failure forgetting remain.",
+    "Consumer harness requires externally prepared exact full archive closure; no ancestor package/compiler/source packing. Guards and causal fixtures are SOURCE ONLY / UNRUN."
+  ],
+  "currentSourceIncrement": {
+    "receiptDirectory": "build/source-only/2026-10-09-images-exact-consumer",
+    "status": "SOURCE ONLY / UNRUN; no check/import-as-test/install/build/pack/history operation",
+    "additionalOriginalPaths": [],
+    "previousBytes": "before/ and before-manifest.json preserve complete immediately preceding HTTP/RGBA draft"
+  }
+}

@@ -20,6 +20,14 @@
     "./node": {
       "types": "./node/codecs.d.mts",
       "import": "./node/codecs.mjs"
+    },
+    "./shaders": {
+      "types": "./dist/shaders.d.ts",
+      "import": "./dist/shaders.js"
+    },
+    "./settings": {
+      "types": "./dist/settings.d.ts",
+      "import": "./dist/settings.js"
     }
   },
   "files": [
@@ -36,9 +44,13 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --maxWorkers=50%",
     "lint": "eslint src tests --cache --cache-strategy content --cache-location node_modules/.cache/eslint/",
-    "ci": "npm run typecheck && npm test && npm run lint && npm run build && npm run typecheck:consumer && npm run test:consumer",
+    "ci": "npm run check:conformance && npm run check:implementation",
     "test:consumer": "node tests/package-consumer.mjs",
-    "typecheck:consumer": "tsc -p tests/tsconfig.json"
+    "check:consumer-prerequisites": "node tests/package-consumer.mjs --prerequisites-only",
+    "typecheck:consumer": "tsc -p tests/tsconfig.json",
+    "check:implementation": "npm run check:consumer-prerequisites && npm run typecheck && npm test && npm run lint && npm run build && npm run typecheck:consumer && npm run test:consumer",
+    "check:conformance": "node node_modules/@foss-earth/ci/bin/conformance.mjs --consumer . --trusted-release .attribution-release.json --output-root build/common-conformance",
+    "check:attribution": "node node_modules/@foss-earth/ci/bin/attribution.mjs --repo . --refs-file build/repository-split/intended-publication-refs.json"
   },
   "dependencies": {
     "jpeg-js": "0.4.4"
@@ -49,5 +61,13 @@
     "vitest": "4.1.6",
     "eslint": "9.39.4",
     "typescript-eslint": "8.59.3"
+  },
+  "peerDependencies": {
+    "@foss-earth/ui": "0.1.0"
+  },
+  "peerDependenciesMeta": {
+    "@foss-earth/ui": {
+      "optional": true
+    }
   }
 }

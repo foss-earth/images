@@ -1,7 +1,8 @@
 {
   "compilerOptions": {
     "target": "ES2023", "module": "NodeNext", "moduleResolution": "NodeNext",
-    "strict": true, "skipLibCheck": true, "noEmit": true
+    "strict": true, "skipLibCheck": false, "noEmit": true,
+    "incremental": true, "tsBuildInfoFile": "../node_modules/.tmp/consumer.tsbuildinfo"
   },
-  "files": ["minimal-consumer.ts"]
+  "files": ["minimal-consumer.ts", "settings-consumer.ts", "node-consumer.ts", "shaders-consumer.ts"]
 }

@@ -153,6 +153,7 @@ describe("the scene media store", () => {
     expect(snapshot.bytes).toBe(300);
     // What is kept is still read.
     expect(await store.get(bookstore, "https://x/b.jpg")).not.toBeNull();
+    expect(await store.getBounded(bookstore, "https://x/b.jpg", { maxBytes: 300, admit: size => size === 300 })).not.toBeNull();
     // Clearing starts again.
     await store.clear();
     store.put(northrop, "https://x/n.jpg", bytes(100), null);
@@ -184,5 +185,14 @@ describe("the scene media store", () => {
     const failing = createMediaStore({ open: async () => { throw new Error("denied"); }, maxBytes: MIB });
     expect(await failing.get(northrop, "https://x/1.jpg")).toBeNull();
     expect((await failing.inspect()).available).toBe(false);
+  });
+  it("treats a custom backend with no admission contract as a bounded miss", async () => {
+    const memory = memoryBackend();
+    const writer = createMediaStore({ open: async () => memory.backend, maxBytes: MIB });
+    writer.put(northrop, "https://x/a.jpg", bytes(20), null); await writer.settled();
+    const backend = { ...memory.backend }; delete backend.readBounded;
+    const reader = createMediaStore({ open: async () => backend, maxBytes: MIB });
+    expect(await reader.getBounded(northrop, "https://x/a.jpg", { maxBytes: 100, admit: () => true })).toBeNull();
+    expect(memory.calls.read).toBe(0); expect(memory.files.size).toBe(1);
   });
 });

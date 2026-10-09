@@ -1,4 +1,4 @@
-import { createResourcePools, type PoolLimits, type PoolName, type Reservation, type ResourcePools } from "./pools.js";
+import { createResourcePools, ResourceCapacityError, type PoolLimits, type PoolName, type Reservation, type ResourcePools } from "./pools.js";
 
 export interface OperationLimiter {
   run<T>(priority: number, signal: AbortSignal, work: () => Promise<T>): Promise<T>;
@@ -90,7 +90,7 @@ export function createImageSessionBroker(initial: ImageSessionLimits): ImageSess
         reserve(pool, bytes, label, options) {
           controller.signal.throwIfAborted();
           const result = pools.reserve(pool, bytes, label, options);
-          if (!result.ok) throw new Error(result.reason);
+          if (!result.ok) throw new ResourceCapacityError(result.pool, result.reason);
           reservations.add(result.reservation);
           return result.reservation;
         },

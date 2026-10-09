@@ -1,0 +1,16 @@
+name: Attribution
+on:
+  pull_request:
+  merge_group:
+    types: [checks_requested]
+  push:
+permissions:
+  contents: read
+jobs:
+  attribution:
+    uses: foss-earth/ci/.github/workflows/attribution.yml@9e046dd482e0229dc7c7b2d71b079d5905664656
+    with:
+      validator-revision: 9e046dd482e0229dc7c7b2d71b079d5905664656
+      source-repository: ${{ github.repository }}
+    permissions:
+      contents: read

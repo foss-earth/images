@@ -37,6 +37,8 @@ export interface RepresentationHooks<R extends ImageRepresentation = ImageRepres
   readonly projection: string;
   validate(record: unknown, context: { path: string; baseUrl: string | null }): RepresentationValidation<R>;
   files(record: R): Iterable<ImageFile>;
+  /** Owner's relative declared-field address for publication diagnostics. */
+  filePath?(record: R, file: ImageFile, enumerationIndex: number): string;
   estimate(record: R, context: { maxTextureSide: number }): ImageEstimate;
 }
 /** Linear-light RGB. The caller applies source orientation once before sampling. */

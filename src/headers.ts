@@ -16,6 +16,35 @@ export interface ImageHeader {
   orientation: number | null;
 }
 
+/** An observed size disagreement, never a classification inferred from a message. */
+export class ImageDimensionMismatch extends Error {
+  readonly actual: Readonly<{ width: number; height: number }>;
+  readonly expected: Readonly<{ width: number; height: number }>;
+  constructor(actual: { width: number; height: number }, expected: { width: number; height: number }, readonly observation: "header" | "decoded") {
+    super(observation === "decoded"
+      ? `Decoded image is ${actual.width}×${actual.height}, declared ${expected.width}×${expected.height}.`
+      : `is ${actual.width}×${actual.height} pixels, declared ${expected.width}×${expected.height}`);
+    this.name = "ImageDimensionMismatch";
+    this.actual = Object.freeze({ width: actual.width, height: actual.height });
+    this.expected = Object.freeze({ width: expected.width, height: expected.height });
+  }
+}
+
+/** Follows typed causes/cleanup aggregates only; representation policy stays with the caller. */
+export function imageDimensionMismatch(error: unknown): ImageDimensionMismatch | null {
+  const seen = new Set<unknown>();
+  const pending: unknown[] = [error];
+  while (pending.length) {
+    const current = pending.pop();
+    if (seen.has(current)) continue;
+    seen.add(current);
+    if (current instanceof ImageDimensionMismatch) return current;
+    if (current instanceof AggregateError) pending.push(...current.errors);
+    if (current instanceof Error && current.cause !== undefined) pending.push(current.cause);
+  }
+  return null;
+}
+
 export function sniffImageKind(bytes: Uint8Array): ImageKind | null {
   if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
   const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
@@ -26,7 +55,12 @@ export function sniffImageKind(bytes: Uint8Array): ImageKind | null {
 function exifOrientation(bytes: Uint8Array, start: number, end: number): number | null {
   // "Exif\0\0", then a TIFF header.
   if (end - start < 14 || String.fromCharCode(...bytes.subarray(start, start + 6)) !== "Exif\0\0") return null;
-  const tiff = start + 6;
+  return tiffOrientation(bytes, start + 6, end);
+}
+
+/** JPEG and PNG both carry TIFF bytes; inspect the bounded original view. */
+function tiffOrientation(bytes: Uint8Array, tiff: number, end: number): number | null {
+  if (end - tiff < 8) return null;
   if (!((bytes[tiff] === 0x49 && bytes[tiff + 1] === 0x49) || (bytes[tiff] === 0x4d && bytes[tiff + 1] === 0x4d))) return null;
   const little = bytes[tiff] === 0x49;
   const u16 = (at: number) => (little ? bytes[at] | (bytes[at + 1] << 8) : (bytes[at] << 8) | bytes[at + 1]);
@@ -82,10 +116,7 @@ function pngHeader(bytes: Uint8Array): ImageHeader | null {
     // Never allocate or inspect a chunk beyond the bytes actually received.
     if (length > bytes.length - at - 12) return null;
     if (type === "eXIf") {
-      const tiff = new Uint8Array(6 + length);
-      tiff.set([0x45, 0x78, 0x69, 0x66, 0, 0]);
-      tiff.set(bytes.subarray(at + 8, Math.min(bytes.length, at + 8 + length)), 6);
-      orientation = exifOrientation(tiff, 0, tiff.length);
+      orientation = tiffOrientation(bytes, at + 8, at + 8 + length);
     }
     if (type === "IDAT" || type === "IEND") break;
     at += 12 + length;
@@ -108,7 +139,11 @@ export function readImageHeader(bytes: Uint8Array): ImageHeader | null {
  * pose governs every representation.
  */
 export function checkImage(bytes: Uint8Array, declared: { mimeType: ImageKind; width: number; height: number }, contentType: string | null): string | null {
-  const header = readImageHeader(bytes);
+  return checkImageHeader(readImageHeader(bytes), declared, contentType);
+}
+
+/** Same declaration checks when the common service already inspected these bytes. */
+export function checkImageHeader(header: ImageHeader | null, declared: { mimeType: ImageKind; width: number; height: number }, contentType: string | null): string | null {
   if (!header) return `is not a readable JPEG or PNG (declared ${declared.mimeType})`;
   if (header.kind !== declared.mimeType) return `is a ${header.kind} file, declared ${declared.mimeType}`;
   const served = contentType?.split(";")[0].trim().toLowerCase() ?? "";
@@ -120,4 +155,18 @@ export function checkImage(bytes: Uint8Array, declared: { mimeType: ImageKind; w
     return `carries EXIF orientation ${header.orientation}; prepare it with scripts/prepare-panorama.mjs, which applies orientation once`;
   }
   return null;
+}
+
+/** Same retained diagnostics, with a typed size observation only for otherwise valid headers. */
+export function imageHeaderError(header: ImageHeader | null, declared: { mimeType: ImageKind; width: number; height: number }, contentType: string | null): Error | null {
+  const problem = checkImageHeader(header, declared, contentType);
+  if (!problem) return null;
+  const served = contentType?.split(";")[0].trim().toLowerCase() ?? "";
+  if (header && Number.isSafeInteger(header.width) && Number.isSafeInteger(header.height) && header.width > 0 && header.height > 0
+      && header.kind === declared.mimeType && (!served.startsWith("image/") || served === header.kind)
+      && (header.orientation === null || header.orientation === 1)
+      && (header.width !== declared.width || header.height !== declared.height)) {
+    return new ImageDimensionMismatch(header, declared, "header");
+  }
+  return new Error(problem);
 }

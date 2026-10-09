@@ -1,2 +1,2 @@
 import { defineConfig } from "vitest/config";
-export default defineConfig({ test: { include: ["src/**/*.test.ts", "tests/**/*.test.ts"], forceRerunTriggers: ["fixtures/**", "package.json", "tsconfig.json", "node/**"] } });
+export default defineConfig({ test: { include: ["src/**/*.test.ts", "tests/**/*.test.ts"], forceRerunTriggers: ["fixtures/**", "tests/**", "package.json", "tsconfig.json", "node/**", "PROVENANCE.json", "SOURCE_SELECTION.json"] } });

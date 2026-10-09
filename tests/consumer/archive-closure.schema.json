@@ -1,0 +1,27 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Externally prepared complete Images consumer archive closure",
+  "type": "object",
+  "required": ["version", "packages"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 1 },
+    "packages": {
+      "type": "array",
+      "minItems": 5,
+      "items": {
+        "type": "object",
+        "required": ["name", "version", "sha256", "bytes", "archive"],
+        "additionalProperties": false,
+        "properties": {
+          "name": { "type": "string", "pattern": "^(?:@[a-z0-9._-]+/)?[a-z0-9._-]+$" },
+          "version": { "type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[a-zA-Z0-9.-]+)?$" },
+          "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" },
+          "bytes": { "type": "integer", "minimum": 1 },
+          "archive": { "type": "string", "minLength": 1 }
+        }
+      }
+    }
+  },
+  "$comment": "Required exact images0.1.0/UI0.1.0/jpeg-js0.4.4/TypeScript5.9.3/typesNode24.12.4 and every installed transitive are enforced by package-consumer.mjs. Archive paths are relative to this manifest or absolute; each pin is measured from actual externally prepared bytes. No placeholder pin qualifies. No schema download occurs."
+}

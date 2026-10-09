@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "component": "@foss-earth/ci",
+  "revision": "9e046dd482e0229dc7c7b2d71b079d5905664656",
+  "artifactSha256": "450ede699f55f9b9c78146eadb73de7c6297e56553e7d7f9e5b164786a7beb24",
+  "policySha256": "9ca88bf5861685e22e65e5f39fa65b05faaf9c218875fccbecce1b9f2dca5bd3",
+  "entryPoint": [
+    "node",
+    "node_modules/@foss-earth/ci/bin/attribution.mjs"
+  ],
+  "workflow": ".github/workflows/attribution-check.yml",
+  "requiredCheck": "attribution / Attribution policy"
+}

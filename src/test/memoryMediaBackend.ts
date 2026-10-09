@@ -12,6 +12,14 @@ export function memoryBackend(options: { quotaBytes?: number } = {}) {
       calls.read += 1;
       return keys.map(key => files.get(key)?.file ?? null);
     },
+    async readBounded(requests) {
+      calls.read += 1;
+      return requests.map(({ key, admission }) => {
+        const file = files.get(key)?.file;
+        if (!file || file.bytes.byteLength > admission.maxBytes || !admission.admit(file.bytes.byteLength)) return null;
+        return { ...file, bytes: file.bytes.slice() };
+      });
+    },
     async write(pending, now) {
       calls.write += 1;
       const fresh = pending.filter(file => !files.has(file.key));

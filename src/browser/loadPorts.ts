@@ -10,7 +10,9 @@ export interface WholeImagePorts<T extends WholeImageTexture> {
   overlap?: boolean;
   obtain(file: ImageFile, declaredBytes: number): Promise<EncodedImageFile>;
   decode(file: EncodedImageFile, declared: ImageFile): Promise<HeldDecodedImage>;
-  /** Upload adapters reserve their actual staging in scope before allocating. */
+  /** Host readiness uses the same renderer. Upload adapters reserve staging in
+   * broker.pools directly and retain submitted tickets until GPU completion;
+   * scope abort cannot free bytes still consumed by nonabortable work. */
   whenReady(texture: T, signal: AbortSignal): Promise<void>;
 }
 export interface LoadedWholeImage<T extends WholeImageTexture> {
@@ -18,6 +20,6 @@ export interface LoadedWholeImage<T extends WholeImageTexture> {
   estimate: ImageEstimate;
   /** Host calls after atomic visibility swap and outgoing-source disposal. */
   settleReplacement(): void;
-  /** Ends this dedicated operation; releases texture and every reservation. */
+  /** Ends this operation. Nonabortable retained work releases its charge on completion. */
   dispose(): void;
 }

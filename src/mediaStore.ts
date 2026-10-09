@@ -30,6 +30,19 @@ export interface SavedFile {
   contentType: string | null;
 }
 
+/** Admission happens before a saved body is cloned/materialized. */
+export interface SavedFileAdmission {
+  maxBytes: number;
+  /** The immutable body length, or a trusted transaction-consistent legacy upper bound. */
+  admit(byteLength: number): boolean;
+}
+
+export interface BoundedFileRead {
+  key: string;
+  group: string;
+  admission: SavedFileAdmission;
+}
+
 export interface MediaGroupRecord {
   id: string;
   label: string;
@@ -51,6 +64,8 @@ export interface MediaStoreBackend {
   groups(): Promise<MediaGroupRecord[]>;
   /** Each key's file, or null where there is none. */
   read(keys: readonly string[]): Promise<(SavedFile | null)[]>;
+  /** Optional safe read; missing support is a cache miss, never an unbounded fallback. */
+  readBounded?(requests: readonly BoundedFileRead[]): Promise<(SavedFile | null)[]>;
   /** Adds the files that are not there yet and counts them into their groups, all or nothing; resolves with what it added. */
   write(files: readonly PendingFile[], now: number): Promise<{ files: number; bytes: number }>;
   /** Marks groups as used now. */
@@ -84,6 +99,7 @@ export interface MediaStoreSnapshot {
 /** A group's files, as the loader of one representation uses them. */
 export interface SavedFiles {
   get(url: string): Promise<SavedFile | null>;
+  getBounded?(url: string, admission: SavedFileAdmission): Promise<SavedFile | null>;
   put(url: string, bytes: Uint8Array, contentType: string | null): void;
   /** Drops a file that turned out not to be an image, so the next load asks the network. */
   forget(url: string): void;
@@ -91,6 +107,7 @@ export interface SavedFiles {
 
 export interface MediaStore {
   get(group: MediaGroup, url: string): Promise<SavedFile | null>;
+  getBounded(group: MediaGroup, url: string, admission: SavedFileAdmission): Promise<SavedFile | null>;
   put(group: MediaGroup, url: string, bytes: Uint8Array, contentType: string | null): void;
   forget(group: MediaGroup, url: string): void;
   /** One group's files. */
@@ -290,6 +307,14 @@ export function createMediaStore(options: {
         pumpReads();
       });
     },
+    async getBounded(group, url, admission) {
+      await init();
+      const storage = backend;
+      if (!using() || !storage?.readBounded || !groups.has(group.id)) return null;
+      const [file] = await storage.readBounded([{ key: fileKey(group.id, url), group: group.id, admission }]).catch(() => [null]);
+      if (file) { reused.files += 1; reused.bytes += file.bytes.byteLength; touch(group.id); flush(); }
+      return file ?? null;
+    },
     put(group, url, bytes, contentType) {
       void init().then(() => {
         if (!keeping() || tooLarge.has(group.id) || bytes.byteLength > maxBytes) return;
@@ -310,6 +335,7 @@ export function createMediaStore(options: {
     files(group) {
       return {
         get: url => store.get(group, url),
+        getBounded: (url, admission) => store.getBounded(group, url, admission),
         put: (url, bytes, contentType) => store.put(group, url, bytes, contentType),
         forget: url => store.forget(group, url),
       };
