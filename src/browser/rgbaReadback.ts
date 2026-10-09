@@ -119,6 +119,10 @@ export async function readbackDecodedImage(options: RgbaReadbackOptions): Promis
       try { options.onCleanupFailure?.(error); } catch (reportError) { failures.push(reportError); }
       // Rejected cleanup has no retirement proof; keep the native allocation charged.
     });
+    // Give an already reported retirement its queued settlement before ending
+    // the borrowed bitmap hold. Unresolved/rejected proof stays quarantined;
+    // this never waits for unknown native retirement.
+    await Promise.resolve();
   } else if (!uncertainCanvas) finishCanvas();
   // Foreign throwing disposal without a retirement port is conservatively charged.
   if (!failures.length) { try { requireCurrent(); } catch (error) { failures.push(error); } }

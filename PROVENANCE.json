@@ -218,7 +218,7 @@
       "adaptation": "Only decodeImageBlob canvas drawImage/getImageData readback fragment, with explicit supplied realm; no blank detection/page/gutter/mip code copied. Pre-admitted canvas/RGBA grants, borrowed native input hold, deferred completion, returned pixel lifecycle and all-stop cleanup are authored public-boundary adaptations.",
       "sourceBlob": "713eb3ca59210f9b033c53e354ec011acc912e74",
       "sourceSha256": "4d303139109abe921912decf8ff9c5271e5135c17384af1cbe0f80a20cb6b8f3",
-      "sha256": "ad52eeb0203be998200aa12b5791bef15705c872de0db0c3d413c32d6d509321"
+      "sha256": "59340b198896fe5551bb19746e9b291d9539274ecc33a3752333d63d33269d44"
     }
   ],
   "capabilities": "Common records/validation/vector pose/linear resampling, headers, exact byte accounting, retained pools/scopes/source cache and shared queues, bounded media cache/file service and optional common settings; separate JPEG/PNG Node normalization; no representation catalogue, spatial structures or GPU initialization. Source-only typed HTTP status, optional MIME inference in same bounded service, and explicit-realm pre-admitted retained RGBA readback; no new codec, page/worker/GPU/scene authority. Pure typed dimension observations and source-prepared externally pinned complete archive consumer guards; no host missing policy or successful qualification.",
@@ -546,7 +546,7 @@
     "tests": "Three actual-common-service cases and installed public failure/retry case prepared; no execution. Prior authored all-cleanup-error case now supplies explicit resolved retirement proof."
   },
   "primarySourceSnapshot": {
-    "createdAtUtc": "2026-10-09T18-37-27Z",
+    "createdAtUtc": "2026-10-09T18-39-38Z",
     "status": "source-only; no qualification or artifact seal",
     "authoredFiles": [
       {
