@@ -193,4 +193,10 @@ assertions remain; the original 14-parameter settings assertion moved intact
 to its optional settings scope. None of this qualifies native decoding,
 browser/GPU behavior, a Node range, host adoption, lineage or remote admission.
 
-YOU CANNOT HAVE AI AS A CO-AUTHOR, OR YOUR CONTRIBUTIONS WILL BE REJECTED.
+
+## Project policies
+
+- [Code of conduct](CODE_OF_CONDUCT.md)
+- [Contributing](CONTRIBUTING.md)
+- [AGPL-3.0 license](LICENSE)
+- [Security](SECURITY.md)

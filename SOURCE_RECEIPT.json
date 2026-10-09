@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "owner": "foss-earth/images",
   "preparedAtUtc": "2026-10-09T18-41-02Z",
-  "status": "SOURCE-ONLY current bytes; checks/history/installed consumers/artifacts/adoption/admission UNRUN",
+  "status": "Current source seal; individual retained check receipts define qualification. Installed archive and application/remote adoption separately recorded in external release descriptor.",
   "sourceRevision": "90e23b3ee96f53ec5900afc5991a21fffa58649d",
   "priorSourceReceipt": "build/source-only/2026-10-09T18-41-02Z/SOURCE_RECEIPT.json.before",
   "sourceManifestPath": "build/source-only/2026-10-09T18-41-02Z/source-manifest.json",
@@ -407,5 +407,32 @@
     "actual app adoption",
     "coordinator public transport and remote admission"
   ],
-  "policySentence": "YOU CANNOT HAVE AI AS A CO-AUTHOR, OR YOUR CONTRIBUTIONS WILL BE REJECTED."
+  "policySentence": "YOU CANNOT HAVE AI AS A CO-AUTHOR, OR YOUR CONTRIBUTIONS WILL BE REJECTED.",
+  "verifiedAtUtc": "2026-10-09T23:43:19.850124+00:00",
+  "currentSourceManifest": {
+    "path": "/Users/felg/gh/foss-earth/foss-earth.github.io/build/repository-split/checks/2026-10-09-granted-verification/images-sealed-source-files.json",
+    "sha256": "715ef741d61e9d90102b6992caa5eac25b4f6dc92d74e58df40738f8d14e0a85",
+    "fileCount": 72
+  },
+  "currentSharedCi": {
+    "revision": "1db73d1ddb342e348a2c9e8387f7bbc7ebb3225e",
+    "policySha256": "cdcda3c5d2968fe115e61627fca95ec744637de533750f1ee680c2a5ede49606",
+    "artifactSha256": "bd884d925b8a7339b15fa61a477cf652bb73d41cc68addf50a050ab6cb151611",
+    "descriptorSha256": "d60ee5067185a768f0890da2ed87d82dbfa08f28282e4d05a35e823c70307122",
+    "callerSha256": "b9fdfbf4bd61ed727abaef4fd9990b92714a6d2c1388feec600dc16337436b2c",
+    "fullIntendedRefs": "external release descriptor; mandatory complete nonempty audit after this commit",
+    "remoteAdmissionVerifiedByOwner": false
+  },
+  "currentChecks": [
+    {
+      "receipt": "/Users/felg/gh/foss-earth/foss-earth.github.io/build/repository-split/checks/2026-10-09-granted-verification/images-ci-install.json",
+      "sha256": "fe9477fa1f2928d9834c5a25f5694061af5c5707b1958306eaa50e8289543ae1",
+      "exitCode": 0
+    },
+    {
+      "receipt": "/Users/felg/gh/foss-earth/foss-earth.github.io/build/repository-split/checks/2026-10-09-granted-verification/images-current-conformance.json",
+      "sha256": "a4a4c47eb5f2c6103d3f40203a33558b41dc27547a7468439c85ba52b55cbe57",
+      "exitCode": 0
+    }
+  ]
 }

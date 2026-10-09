@@ -37,7 +37,17 @@
     "PROVENANCE.json",
     "README.md",
     "NOTICE",
-    "SOURCE_LINEAGE.json"
+    "SOURCE_LINEAGE.json",
+    "CODE_OF_CONDUCT.md",
+    "CONTRIBUTING.md",
+    "SECURITY.md",
+    "AGENTS.md",
+    "SOURCE_RECEIPT.json",
+    "SOURCE_SELECTION.json",
+    ".attribution.json",
+    ".attribution-release.json",
+    ".github/workflows/attribution-check.yml",
+    "deps/foss-earth-ci-1db73d1ddb342e348a2c9e8387f7bbc7ebb3225e.tgz"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -60,7 +70,8 @@
     "typescript": "5.9.3",
     "vitest": "4.1.6",
     "eslint": "9.39.4",
-    "typescript-eslint": "8.59.3"
+    "typescript-eslint": "8.59.3",
+    "@foss-earth/ci": "file:deps/foss-earth-ci-1db73d1ddb342e348a2c9e8387f7bbc7ebb3225e.tgz"
   },
   "peerDependencies": {
     "@foss-earth/ui": "0.1.0"
