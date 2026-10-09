@@ -352,7 +352,7 @@
     },
     {
       "destination": "tests/installed-consumer.mjs",
-      "sha256": "3175431ddda54e249078fdc92ab2a50c9642ed8cf3093b43f7e776bcd86db985",
+      "sha256": "3e240b7c73d43989e02de3b4e915c77f8b28638a9b7e89c03faad79a3c1a0f75",
       "origin": "New extraction contract/barrel/declaration or causal consumer/lifecycle fixture; no original source author metadata invented."
     },
     {
@@ -546,7 +546,7 @@
     "tests": "Three actual-common-service cases and installed public failure/retry case prepared; no execution. Prior authored all-cleanup-error case now supplies explicit resolved retirement proof."
   },
   "primarySourceSnapshot": {
-    "createdAtUtc": "2026-10-09T18-39-38Z",
+    "createdAtUtc": "2026-10-09T18-41-02Z",
     "status": "source-only; no qualification or artifact seal",
     "authoredFiles": [
       {
@@ -725,8 +725,8 @@
       },
       {
         "path": "tests/installed-consumer.mjs",
-        "sha256": "3175431ddda54e249078fdc92ab2a50c9642ed8cf3093b43f7e776bcd86db985",
-        "bytes": 8655,
+        "sha256": "3e240b7c73d43989e02de3b4e915c77f8b28638a9b7e89c03faad79a3c1a0f75",
+        "bytes": 8659,
         "status": "authored source/scaffold/adapter/fixture; UNRUN"
       },
       {

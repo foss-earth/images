@@ -57,6 +57,7 @@ const canvasPixels = new Uint8ClampedArray(8), borrowedCanvas = { width: 2, heig
 const realmSurface = createCanvasRgbaSurface({ width: 2, height: 1, createCanvas: () => borrowedCanvas });
 assert.equal(realmSurface.read({ width: 2, height: 1 }), canvasPixels); realmSurface.dispose(); assert.equal(borrowedCanvas.width, 0); assert.equal(borrowedCanvas.height, 0);
 // Actual common accounting retains a partially constructed canvas until reset proof.
+{
 const failedBroker = createImageSessionBroker({ requests: 1, decodes: 1, pools: { encoded: 1000, decoded: 100, sourceGpu: 100, uploadOutstanding: 100, overlap: 100 } });
 const failedScope = failedBroker.scope();
 const failedService = createImageFileService({ broker: failedBroker, priority: () => 0, limits: () => ({ responseBytes: 1000, timeoutMs: 1000 }), fetch: async () => new Response(png), decode: async () => ({ width: 2, height: 1, close() {} }) });
@@ -73,4 +74,5 @@ assert.ok(failedSurface instanceof RgbaSurfaceCreationError);
 failedScope.dispose(); failedBroker.dispose(); assert.equal(failedBroker.pools.stats().decoded.reserved, 8);
 resetFails = false; failedSurface.retryCleanup(); await failedSurface.retired;
 assert.deepEqual(failedBroker.pools.live(), []);
+}
 console.log("Installed images root/browser/node imports, codec/color round trip, retained decoded/RGBA resources and canvas retirement, inferred headers, typed dimensions, HTTP status and shared broker passed.");
