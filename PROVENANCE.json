@@ -150,8 +150,8 @@
       "source": "src/scenes/panoramaResources.ts",
       "sourceSha256": "d1311f2eb3af959ad612b9eb53de30a0fc9841f3fce8b7772dcb08e84451e13e",
       "destination": "src/browser/loadPorts.ts",
-      "sha256": "eab7cc99b51b665695770a7b9ca33f843b60a3eb07998630fb95485c2f402670",
-      "adaptation": "Structural common acquisition/decode/readiness ports; renderer remains host-owned.",
+      "sha256": "d8c65e2aca8e6ecf56574e816fcfd054930e95df66c6cab897c428c0fe706c8d",
+      "adaptation": "Common injected source/upload/readiness ports and loaded-resource lifecycle only; host explicitly settles overlap after outgoing-source disposal.",
       "sourceBlob": "d9791774a301fed0bd074f5ed98f94956cd5edf2"
     },
     {

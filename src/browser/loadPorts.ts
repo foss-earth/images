@@ -16,6 +16,8 @@ export interface WholeImagePorts<T extends WholeImageTexture> {
 export interface LoadedWholeImage<T extends WholeImageTexture> {
   texture: T;
   estimate: ImageEstimate;
+  /** Host calls after atomic visibility swap and outgoing-source disposal. */
+  settleReplacement(): void;
   /** Ends this dedicated operation; releases texture and every reservation. */
   dispose(): void;
 }
