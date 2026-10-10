@@ -1,5 +1,6 @@
 import { deflateSync, inflateSync } from "node:zlib";
 import jpeg from "jpeg-js";
+import { readImageHeader } from "../dist/headers.js";
 export { srgbToLinear, linearToSrgb, toLinearImage, toSrgbImage, applyOrientation, colourIsSrgb, dropOpaqueAlpha } from "../dist/color.js";
 
 // ─── PNG ───────────────────────────────────────────────────────────────
@@ -74,53 +75,115 @@ export function encodePng({ width, height, rgb }) {
   ]);
 }
 
-/**
- * Decodes an 8-bit, non-interlaced greyscale, RGB or RGBA PNG to RGBA, with
- * what it says about colour: an ICC profile's name, an sRGB chunk, gamma,
- * and any XMP packet.
- */
-export function decodePng(data) {
+/** Finite codec-owned buffer reservations, not a process/RSS or GC guarantee. */
+export const DEFAULT_IMAGE_DECODE_LIMITS = Object.freeze({
+  maxEncodedBytes: 64 * 1024 * 1024, maxPixels: 400_000_000,
+  maxMemoryBytes: 2048 * 1024 * 1024, maxMetadataBytes: 4 * 1024 * 1024, maxChunks: 100000,
+});
+export class ImageDecodeLimitError extends RangeError {
+  constructor(code, message) { super(message); this.name = "ImageDecodeLimitError"; this.code = code; }
+}
+function checkAbort(signal) { if (signal?.aborted) throw signal.reason ?? new DOMException("Image decode cancelled", "AbortError"); }
+function decodeLimits(options = {}) {
+  const limits = { ...DEFAULT_IMAGE_DECODE_LIMITS, ...options };
+  for (const key of Object.keys(DEFAULT_IMAGE_DECODE_LIMITS)) if (!Number.isSafeInteger(limits[key]) || limits[key] < 1) throw new RangeError(`${key} must be a positive safe integer`);
+  checkAbort(limits.signal); return limits;
+}
+function within(value, maximum, code) {
+  if (!Number.isSafeInteger(value) || value < 0 || value > maximum) throw new ImageDecodeLimitError(code, `Image ${code} budget exceeded (${value} > ${maximum})`);
+}
+function pngChunks(data, limits) {
   if (!data.subarray(0, 8).equals(PNG_SIGNATURE)) throw new Error("not a PNG");
-  let offset = 8;
-  let width = 0, height = 0, channels = 0, colourType = -1;
-  const idat = [];
-  const colour = { iccProfileName: null, srgbChunk: false, gamma: null };
-  let xmp = null;
+  const chunks = []; let offset = 8, ended = false;
   while (offset < data.length) {
-    const len = data.readUInt32BE(offset);
+    checkAbort(limits.signal); within(chunks.length + 1, limits.maxChunks, "chunks");
+    if (offset + 12 > data.length) throw new Error("Truncated PNG chunk");
+    const length = data.readUInt32BE(offset), end = offset + 12 + length;
+    if (end > data.length) throw new Error("Truncated PNG chunk body");
     const type = data.toString("ascii", offset + 4, offset + 8);
-    const body = data.subarray(offset + 8, offset + 8 + len);
-    if (type === "IHDR") {
-      width = body.readUInt32BE(0);
-      height = body.readUInt32BE(4);
-      const [depth, colorType, , , interlace] = body.subarray(8);
-      colourType = colorType;
-      if (depth !== 8 || interlace !== 0 || ![0, 2, 4, 6].includes(colorType)) {
-        throw new Error("PNG input must be 8-bit greyscale, RGB or RGBA without interlacing; convert it first");
-      }
-      channels = { 0: 1, 2: 3, 4: 2, 6: 4 }[colorType];
-    } else if (type === "IDAT") idat.push(body);
-    else if (type === "iCCP") {
-      // The chunk's own name is free text; the profile's description says what it is.
-      const nameEnd = body.indexOf(0);
-      colour.iccProfileName = iccDescription(inflateSync(body.subarray(nameEnd + 2)));
-    }
-    else if (type === "sRGB") colour.srgbChunk = true;
-    else if (type === "gAMA") colour.gamma = body.readUInt32BE(0) / 100000;
-    else if (type === "iTXt" && body.toString("latin1", 0, body.indexOf(0)) === "XML:com.adobe.xmp") {
-      // keyword\0 compression-flag compression-method language\0 translated\0 text
-      let cursor = body.indexOf(0) + 3;
-      cursor = body.indexOf(0, cursor) + 1;
-      cursor = body.indexOf(0, cursor) + 1;
-      xmp = body[body.indexOf(0) + 1] === 1 ? inflateSync(body.subarray(cursor)).toString("utf8") : body.toString("utf8", cursor);
-    }
-    offset += 12 + len;
+    chunks.push({ type, body: data.subarray(offset + 8, end - 4) }); offset = end;
+    if (type === "IEND") { if (length !== 0 || offset !== data.length) throw new Error("Invalid PNG end"); ended = true; break; }
   }
-  const raw = inflateSync(Buffer.concat(idat));
+  if (!ended || chunks[0]?.type !== "IHDR" || chunks[0].body.length !== 13 || chunks.filter(chunk => chunk.type === "IHDR").length !== 1) throw new Error("Invalid PNG header/end");
+  const body = chunks[0].body, colourType = body[9];
+  if (body[8] !== 8 || body[10] !== 0 || body[11] !== 0 || body[12] !== 0 || ![0, 2, 4, 6].includes(colourType)) throw new Error("PNG input must be 8-bit greyscale, RGB or RGBA without interlacing; convert it first");
+  return { chunks, width: body.readUInt32BE(0), height: body.readUInt32BE(4), colourType, channels: { 0: 1, 2: 3, 4: 2, 6: 4 }[colourType] };
+}
+function inspect(data, limits) {
+  within(data.byteLength, limits.maxEncodedBytes, "encoded");
+  const header = readImageHeader(data);
+  if (!header || header.width < 1 || header.height < 1) throw new Error("Invalid PNG/JPEG image header");
+  const pixels = header.width * header.height; within(pixels, limits.maxPixels, "pixels");
+  const rgbaBytes = pixels * 4;
+  let workingBytes, png;
+  if (header.kind === "image/png") {
+    png = pngChunks(data, limits);
+    const hasMetadata = png.chunks.some(chunk => ["iCCP", "iTXt"].includes(chunk.type));
+    // Includes encoded input + IDAT concatenation; native output chunk headroom;
+    // inflated rows + zlib output chunks; channel pixels; RGBA; bounded metadata.
+    workingBytes = data.byteLength * 2 + (pixels * png.channels + header.height) * 2 + pixels * png.channels + rgbaBytes + 1024 * 1024 + (hasMetadata ? limits.maxMetadataBytes * 4 : 0);
+    within(workingBytes, limits.maxMemoryBytes, "memory");
+  } else {
+    // jpeg-js enforces the remaining tracked-allocation budget. Input copies,
+    // comments and metadata are charged separately; the reservation is conservative.
+    const overhead = data.byteLength * 4 + limits.maxMetadataBytes * 4 + 1024 * 1024;
+    workingBytes = Math.min(limits.maxMemoryBytes, overhead + pixels * 160 + rgbaBytes + 1024 * 1024);
+    within(overhead + rgbaBytes, limits.maxMemoryBytes, "memory");
+  }
+  return { mimeType: header.kind, width: header.width, height: header.height, pixels, rgbaBytes, workingBytes, png };
+}
+/** Inspect without decoding. The reservation includes the returned RGBA buffer. */
+export function inspectImageDecode(data, options) {
+  const { png: _png, ...plan } = inspect(data, decodeLimits(options)); return plan;
+}
+
+/** Bounded 8-bit non-interlaced PNG decoding. Inflation is capped before allocation. */
+export function decodePng(data, options) {
+  const limits = decodeLimits(options), plan = inspect(data, limits);
+  if (plan.mimeType !== "image/png") throw new Error("not a PNG");
+  const { width, height, channels, colourType, chunks } = plan.png;
+  const idat = [], colour = { iccProfileName: null, srgbChunk: false, gamma: null };
+  let xmp = null, metadataBytes = 0;
+  const metadata = (body, compressed) => {
+    const remaining = limits.maxMetadataBytes - metadataBytes;
+    if (remaining <= 0) throw new ImageDecodeLimitError("metadata", "Image metadata budget exceeded");
+    let result;
+    if (compressed) {
+      try { result = inflateSync(body, { maxOutputLength: remaining }); }
+      catch (error) { if (error.code === "ERR_BUFFER_TOO_LARGE") throw new ImageDecodeLimitError("metadata", "Image metadata inflation exceeds budget"); throw error; }
+    } else { within(body.length, remaining, "metadata"); result = body; }
+    metadataBytes += result.length; return result;
+  };
+  for (const { type, body } of chunks) {
+    checkAbort(limits.signal);
+    if (type === "IDAT") idat.push(body);
+    else if (type === "iCCP") {
+      const end = body.indexOf(0);
+      if (end < 0 || body[end + 1] !== 0) throw new Error("Invalid PNG ICC chunk");
+      colour.iccProfileName = iccDescription(metadata(body.subarray(end + 2), true));
+    } else if (type === "sRGB") colour.srgbChunk = true;
+    else if (type === "gAMA") { if (body.length !== 4) throw new Error("Invalid PNG gamma"); colour.gamma = body.readUInt32BE(0) / 100000; }
+    else if (type === "iTXt") {
+      const end = body.indexOf(0);
+      if (end < 0 || end + 3 > body.length) throw new Error("Invalid PNG text chunk");
+      if (body.toString("latin1", 0, end) !== "XML:com.adobe.xmp") continue;
+      const flag = body[end + 1];
+      let languageEnd = body.indexOf(0, end + 3), translatedEnd = languageEnd < 0 ? -1 : body.indexOf(0, languageEnd + 1);
+      if (translatedEnd < 0 || flag > 1 || body[end + 2] !== 0) throw new Error("Invalid PNG XMP chunk");
+      xmp = metadata(body.subarray(translatedEnd + 1), flag === 1).toString("utf8");
+    }
+  }
+  const expected = (width * channels + 1) * height;
+  let raw;
+  try { raw = inflateSync(Buffer.concat(idat), { maxOutputLength: expected }); }
+  catch (error) { if (error.code === "ERR_BUFFER_TOO_LARGE") throw new ImageDecodeLimitError("pixels", "PNG inflation exceeds declared image dimensions"); throw error; }
+  if (raw.length !== expected) throw new Error("PNG row length differs from declared dimensions");
   const stride = width * channels;
   const pixels = Buffer.alloc(stride * height);
   for (let y = 0; y < height; y++) {
+    checkAbort(limits.signal);
     const filter = raw[y * (stride + 1)];
+    if (filter > 4) throw new Error("Invalid PNG row filter");
     const line = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
     for (let x = 0; x < stride; x++) {
       const left = x >= channels ? pixels[y * stride + x - channels] : 0;
@@ -147,23 +210,29 @@ export function decodePng(data) {
     rgba[i * 4 + 2] = grey ? pixels[s] : pixels[s + 2];
     rgba[i * 4 + 3] = channels === 2 ? pixels[s + 1] : channels === 4 ? pixels[s + 3] : 255;
   }
+  checkAbort(limits.signal);
   return { width, height, rgba, colour, xmp, orientation: 1 };
 }
 
 // ─── JPEG ──────────────────────────────────────────────────────────────
 
 /** The EXIF orientation (1–8), the ICC profile's description and the XMP packet of a JPEG, without decoding pixels. */
-export function readJpegMetadata(data) {
+export function readJpegMetadata(data, options) {
+  const limits = decodeLimits(options); within(data.byteLength, limits.maxEncodedBytes, "encoded");
+  let chunks = 0, metadataBytes = 0;
   if (data[0] !== 0xff || data[1] !== 0xd8) throw new Error("not a JPEG");
   let offset = 2;
   let orientation = 1;
   let xmp = null;
   const iccChunks = [];
   while (offset + 4 <= data.length) {
+    checkAbort(limits.signal); within(++chunks, limits.maxChunks, "chunks");
     if (data[offset] !== 0xff) break;
     const marker = data[offset + 1];
     if (marker === 0xd9 || marker === 0xda) break;
     const size = data.readUInt16BE(offset + 2);
+    if (size < 2 || offset + 2 + size > data.length) throw new Error("Truncated JPEG segment");
+    if (marker >= 0xe0 && marker <= 0xef) { metadataBytes += size - 2; within(metadataBytes, limits.maxMetadataBytes, "metadata"); }
     const body = data.subarray(offset + 4, offset + 2 + size);
     if (marker === 0xe1 && body.toString("latin1", 0, 6) === "Exif\0\0") orientation = readExifOrientation(body.subarray(6)) ?? orientation;
     else if (marker === 0xe1 && body.toString("latin1", 0, 29) === "http://ns.adobe.com/xap/1.0/\0") xmp = body.toString("utf8", 29);
@@ -189,11 +258,14 @@ function readExifOrientation(tiff) {
 
 /** An ICC profile's 'desc' text, enough to tell sRGB from anything else. */
 function iccDescription(icc) {
+  if (icc.length < 132) throw new Error("Truncated ICC profile");
   const tags = icc.readUInt32BE(128);
+  if (132 + tags * 12 > icc.length) throw new Error("Truncated ICC tag table");
   for (let i = 0; i < tags; i++) {
     const at = 132 + i * 12;
     if (icc.toString("latin1", at, at + 4) !== "desc") continue;
     const offset = icc.readUInt32BE(at + 4);
+    if (offset + 28 > icc.length) throw new Error("Truncated ICC description");
     const type = icc.toString("latin1", offset, offset + 4);
     if (type === "desc") return icc.toString("latin1", offset + 12, offset + 12 + icc.readUInt32BE(offset + 8) - 1).replace(/\0+$/, "");
     if (type === "mluc") {
@@ -204,9 +276,15 @@ function iccDescription(icc) {
   return "unnamed profile";
 }
 
-export function decodeJpeg(data) {
-  const metadata = readJpegMetadata(data);
-  const decoded = jpeg.decode(data, { useTArray: true, formatAsRGBA: true, maxMemoryUsageInMB: 2048, maxResolutionInMP: 400 });
+export function decodeJpeg(data, options) {
+  const limits = decodeLimits(options), plan = inspect(data, limits);
+  if (plan.mimeType !== "image/jpeg") throw new Error("not a JPEG");
+  const metadata = readJpegMetadata(data, limits);
+  checkAbort(limits.signal);
+  const overhead = data.byteLength * 4 + limits.maxMetadataBytes * 4 + 1024 * 1024;
+  const decoded = jpeg.decode(data, { useTArray: true, formatAsRGBA: true, maxMemoryUsageInMB: (plan.workingBytes - overhead) / (1024 * 1024), maxResolutionInMP: limits.maxPixels / 1000000 });
+  checkAbort(limits.signal);
+  if (decoded.width !== plan.width || decoded.height !== plan.height) throw new Error("JPEG decoded dimensions differ from inspected header");
   return {
     width: decoded.width,
     height: decoded.height,

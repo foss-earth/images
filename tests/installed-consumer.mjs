@@ -17,6 +17,14 @@ assert.deepEqual([...codecs.toSrgbImage(codecs.resizeArea(codecs.toLinearImage(d
 const jpeg = codecs.encodeJpeg({ width: 1, height: 1, rgb: new Uint8Array([230, 50, 25]) }, 90);
 assert.equal(codecs.sniffImage(jpeg), "image/jpeg");
 assert.equal(codecs.decodeJpeg(jpeg).width, 1);
+const decodeOptions = { maxEncodedBytes: 4096, maxPixels: 2, maxMemoryBytes: 2 * 1024 * 1024, maxMetadataBytes: 128, maxChunks: 20 };
+const plan = codecs.inspectImageDecode(png, decodeOptions);
+assert.equal(plan.rgbaBytes, 8); assert.ok(plan.workingBytes >= png.length + 8);
+assert.deepEqual([...codecs.decodePng(png, decodeOptions).rgba], [...codecs.decodePng(png).rgba]);
+assert.equal(codecs.decodeJpeg(jpeg, decodeOptions).width, 1);
+for (const options of [{ maxPixels: 1 }, { maxMemoryBytes: 1 }, { maxEncodedBytes: 1 }, { maxChunks: 1 }]) assert.throws(() => codecs.decodePng(png, options), codecs.ImageDecodeLimitError);
+const cancelledDecode = new AbortController(); cancelledDecode.abort(new Error("installed cancellation"));
+assert.throws(() => codecs.decodePng(png, { signal: cancelledDecode.signal }), /installed cancellation/);
 const decodeBroker = createImageSessionBroker({ pools: { sourceGpu: 16, encoded: 1000, decoded: 16, uploadOutstanding: 16, overlap: 8 }, requests: 1, decodes: 1 });
 let bitmapClosed = 0;
 const held = await decodeImageFile({ broker: decodeBroker, scope: decodeBroker.scope(), priority: 0, declared: { mimeType: "image/png", width: 2, height: 1 }, file: { bytes: png, contentType: "image/png", release() {} }, decode: async () => ({ width: 2, height: 1, close() { bitmapClosed += 1; } }) });
