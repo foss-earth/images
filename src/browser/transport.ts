@@ -12,8 +12,10 @@ export interface EncodedImageFile {
 }
 /** Transport status only; representation owners decide missing versus retry. */
 export class ImageHttpStatusError extends Error {
-  constructor(readonly url: string, readonly status: number, options?: ErrorOptions) {
-    super(`${url} answered ${status}`, options); this.name = "ImageHttpStatusError";
+  readonly url: string;
+  readonly status: number;
+  constructor(url: string, status: number, options?: ErrorOptions) {
+    super(`${url} answered ${status}`, options); this.url = url; this.status = status; this.name = "ImageHttpStatusError";
   }
 }
 /** Bounded common transfer; representation owners supply URLs and declared sizes. */

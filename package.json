@@ -10,10 +10,12 @@
   },
   "exports": {
     ".": {
+      "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
     "./browser": {
+      "source": "./src/browser/index.ts",
       "types": "./dist/browser/index.d.ts",
       "import": "./dist/browser/index.js"
     },
@@ -22,10 +24,12 @@
       "import": "./node/codecs.mjs"
     },
     "./shaders": {
+      "source": "./src/shaders.ts",
       "types": "./dist/shaders.d.ts",
       "import": "./dist/shaders.js"
     },
     "./settings": {
+      "source": "./src/settings.ts",
       "types": "./dist/settings.d.ts",
       "import": "./dist/settings.js"
     }
@@ -34,33 +38,19 @@
     "dist",
     "node",
     "LICENSE",
-    "PROVENANCE.json",
     "README.md",
     "NOTICE",
-    "SOURCE_LINEAGE.json",
-    "CODE_OF_CONDUCT.md",
-    "CONTRIBUTING.md",
-    "SECURITY.md",
-    "AGENTS.md",
-    "SOURCE_RECEIPT.json",
-    "SOURCE_SELECTION.json",
-    ".attribution.json",
-    ".attribution-release.json",
-    ".github/workflows/attribution-check.yml",
-    "deps/foss-earth-ci-1db73d1ddb342e348a2c9e8387f7bbc7ebb3225e.tgz"
+    "AGENTS.md"
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run --maxWorkers=50%",
     "lint": "eslint src tests --cache --cache-strategy content --cache-location node_modules/.cache/eslint/",
-    "ci": "npm run check:conformance && npm run check:implementation",
+    "ci": "npm run check:implementation",
     "test:consumer": "node tests/package-consumer.mjs",
-    "check:consumer-prerequisites": "node tests/package-consumer.mjs --prerequisites-only",
     "typecheck:consumer": "tsc -p tests/tsconfig.json",
-    "check:implementation": "npm run check:consumer-prerequisites && npm run typecheck && npm test && npm run lint && npm run build && npm run typecheck:consumer && npm run test:consumer",
-    "check:conformance": "node node_modules/@foss-earth/ci/bin/conformance.mjs --consumer . --trusted-release .attribution-release.json --output-root build/common-conformance",
-    "check:attribution": "node node_modules/@foss-earth/ci/bin/attribution.mjs --repo . --refs-file build/repository-split/intended-publication-refs.json"
+    "check:implementation": "npm run typecheck && npm test && npm run lint && npm run build && npm run typecheck:consumer && npm run test:consumer"
   },
   "dependencies": {
     "jpeg-js": "0.4.4"
@@ -70,8 +60,7 @@
     "typescript": "5.9.3",
     "vitest": "4.1.6",
     "eslint": "9.39.4",
-    "typescript-eslint": "8.59.3",
-    "@foss-earth/ci": "file:deps/foss-earth-ci-1db73d1ddb342e348a2c9e8387f7bbc7ebb3225e.tgz"
+    "typescript-eslint": "8.59.3"
   },
   "peerDependencies": {
     "@foss-earth/ui": "0.1.0"

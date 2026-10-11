@@ -35,8 +35,9 @@ export type ReserveResult =
 
 /** Admission failure, distinct from damaged bytes or a decoder failure. */
 export class ResourceCapacityError extends Error {
-  constructor(readonly pool: PoolName | "overlap", reason: string) {
-    super(reason); this.name = "ResourceCapacityError";
+  readonly pool: PoolName | "overlap";
+  constructor(pool: PoolName | "overlap", reason: string) {
+    super(reason); this.pool = pool; this.name = "ResourceCapacityError";
   }
 }
 

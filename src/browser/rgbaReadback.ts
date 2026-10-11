@@ -13,8 +13,11 @@ export interface RgbaReadbackSurface {
 }
 /** A factory that allocated before failing must preserve its retirement proof. */
 export class RgbaSurfaceCreationError extends AggregateError {
-  constructor(failures: readonly unknown[], readonly retired: Promise<void>, readonly retryCleanup: () => void) {
+  readonly retired: Promise<void>;
+  readonly retryCleanup: () => void;
+  constructor(failures: readonly unknown[], retired: Promise<void>, retryCleanup: () => void) {
     super(failures, `RGBA surface creation failed: ${failures[0] instanceof Error ? failures[0].message : "allocation failed"}`);
+    this.retired = retired; this.retryCleanup = retryCleanup;
     this.name = "RgbaSurfaceCreationError";
   }
 }

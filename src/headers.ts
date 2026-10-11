@@ -20,10 +20,12 @@ export interface ImageHeader {
 export class ImageDimensionMismatch extends Error {
   readonly actual: Readonly<{ width: number; height: number }>;
   readonly expected: Readonly<{ width: number; height: number }>;
-  constructor(actual: { width: number; height: number }, expected: { width: number; height: number }, readonly observation: "header" | "decoded") {
+  readonly observation: "header" | "decoded";
+  constructor(actual: { width: number; height: number }, expected: { width: number; height: number }, observation: "header" | "decoded") {
     super(observation === "decoded"
       ? `Decoded image is ${actual.width}×${actual.height}, declared ${expected.width}×${expected.height}.`
       : `is ${actual.width}×${actual.height} pixels, declared ${expected.width}×${expected.height}`);
+    this.observation = observation;
     this.name = "ImageDimensionMismatch";
     this.actual = Object.freeze({ width: actual.width, height: actual.height });
     this.expected = Object.freeze({ width: expected.width, height: expected.height });
