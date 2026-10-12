@@ -1,4 +1,4 @@
-import { deflateSync, inflateSync } from "node:zlib";
+import zlib, { deflateSync, inflateSync } from "node:zlib";
 import jpeg from "jpeg-js";
 import { decodeSequentialJpeg } from "./jpegDecode.mjs";
 import { encodeBaselineJpeg } from "./jpegEncode.mjs";
@@ -14,23 +14,93 @@ const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
   return c >>> 0;
 });
 
+// zlib computes the same CRC natively from Node 22.2 and 20.15.
+const nativeCrc32 = zlib.crc32;
+
 function crc32(bytes) {
+  if (nativeCrc32) return nativeCrc32(bytes);
   let c = 0xffffffff;
   for (const b of bytes) c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8);
   return (c ^ 0xffffffff) >>> 0;
 }
 
 function pngChunk(type, data) {
-  const head = Buffer.alloc(8);
-  head.writeUInt32BE(data.length, 0);
-  head.write(type, 4, "ascii");
-  const crc = Buffer.alloc(4);
-  crc.writeUInt32BE(crc32(Buffer.concat([head.subarray(4), data])), 0);
-  return Buffer.concat([head, data, crc]);
+  const chunk = Buffer.alloc(data.length + 12);
+  chunk.writeUInt32BE(data.length, 0);
+  chunk.write(type, 4, "ascii");
+  chunk.set(data, 8);
+  chunk.writeUInt32BE(crc32(chunk.subarray(4, data.length + 8)), data.length + 8);
+  return chunk;
 }
 
 /** 8-bit RGB PNG with an sRGB chunk, each row filtered with the smallest of the five filters. */
 export function encodePng({ width, height, rgb }) {
+  const whole = rgb instanceof Uint8Array && Number.isSafeInteger(width) && Number.isSafeInteger(height) && width >= 1 && height >= 1 && rgb.length >= width * height * 3;
+  const raw = whole ? filterRows(rgb, width, height) : filterRowsEach(rgb, width, height);
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(width, 0);
+  ihdr.writeUInt32BE(height, 4);
+  ihdr.set([8, 2, 0, 0, 0], 8);
+  return Buffer.concat([
+    PNG_SIGNATURE,
+    pngChunk("IHDR", ihdr),
+    // Rendering intent 0, perceptual: the pixels are sRGB.
+    pngChunk("sRGB", Buffer.from([0])),
+    pngChunk("IDAT", deflateSync(raw, { level: 9 })),
+    pngChunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
+/**
+ * The rows deflate takes, as filterRowsEach writes them, from a Uint8Array holding every pixel: the five filters'
+ * scores in one pass, the lowest kept (the earlier filter on a tie), and only its bytes written.
+ */
+function filterRows(rgb, width, height) {
+  const stride = width * 3, raw = Buffer.alloc((stride + 1) * height), zero = new Uint8Array(stride);
+  for (let y = 0, o = 0, d = 1; y < height; y++, o += stride, d += stride + 1) {
+    // The first row's filters see a row of zeros above it.
+    const up = y > 0 ? rgb : zero, u = y > 0 ? o - stride : 0;
+    let s0 = 0, s1 = 0, s2 = 0, s3 = 0, s4 = 0;
+    // The first pixel has zeros to its left, so Sub keeps its bytes and Paeth predicts the byte above.
+    for (let x = 0; x < 3; x++) {
+      const value = rgb[o + x], above = up[u + x], score = distance(value);
+      s0 += score; s1 += score; s2 += distance(value - above); s3 += distance(value - (above >> 1)); s4 += distance(value - above);
+    }
+    for (let x = 3; x < stride; x++) {
+      const value = rgb[o + x], above = up[u + x], left = rgb[o + x - 3], upLeft = up[u + x - 3];
+      s0 += distance(value); s1 += distance(value - left); s2 += distance(value - above);
+      s3 += distance(value - ((left + above) >> 1)); s4 += distance(value - paeth(left, above, upLeft));
+    }
+    let best = 0, score = s0;
+    if (s1 < score) { best = 1; score = s1; }
+    if (s2 < score) { best = 2; score = s2; }
+    if (s3 < score) { best = 3; score = s3; }
+    if (s4 < score) best = 4;
+    raw[d - 1] = best;
+    // A Uint8Array keeps each difference's low byte, as & 0xff does.
+    if (best === 0) raw.set(rgb.subarray(o, o + stride), d);
+    else if (best === 1) for (let x = 0; x < stride; x++) raw[d + x] = rgb[o + x] - (x >= 3 ? rgb[o + x - 3] : 0);
+    else if (best === 2) for (let x = 0; x < stride; x++) raw[d + x] = rgb[o + x] - up[u + x];
+    else if (best === 3) for (let x = 0; x < stride; x++) raw[d + x] = rgb[o + x] - (((x >= 3 ? rgb[o + x - 3] : 0) + up[u + x]) >> 1);
+    else for (let x = 0; x < stride; x++) raw[d + x] = rgb[o + x] - paeth(x >= 3 ? rgb[o + x - 3] : 0, up[u + x], x >= 3 ? up[u + x - 3] : 0);
+  }
+  return raw;
+}
+
+/** A filtered byte's score, its distance from 0 as a signed byte: v < 128 ? v : 256 - v, v the difference's low byte. */
+function distance(difference) {
+  return Math.abs((difference << 24) >> 24);
+}
+
+/** The predictor of the Paeth filter: whichever neighbour is nearest left + above - upLeft, in that order on ties. */
+function paeth(left, above, upLeft) {
+  const p = left + above - upLeft;
+  const pa = Math.abs(p - left), pb = Math.abs(p - above), pc = Math.abs(p - upLeft);
+  return pa <= pb && pa <= pc ? left : pb <= pc ? above : upLeft;
+}
+
+/** The rows deflate takes, each filter written out in turn and the smallest kept: the form for any other pixels. */
+function filterRowsEach(rgb, width, height) {
   const stride = width * 3;
   const raw = Buffer.alloc((stride + 1) * height);
   const candidates = Array.from({ length: 5 }, () => Buffer.alloc(stride));
@@ -63,18 +133,7 @@ export function encodePng({ width, height, rgb }) {
     raw[y * (stride + 1)] = bestFilter;
     candidates[bestFilter].copy(raw, y * (stride + 1) + 1);
   }
-  const ihdr = Buffer.alloc(13);
-  ihdr.writeUInt32BE(width, 0);
-  ihdr.writeUInt32BE(height, 4);
-  ihdr.set([8, 2, 0, 0, 0], 8);
-  return Buffer.concat([
-    PNG_SIGNATURE,
-    pngChunk("IHDR", ihdr),
-    // Rendering intent 0, perceptual: the pixels are sRGB.
-    pngChunk("sRGB", Buffer.from([0])),
-    pngChunk("IDAT", deflateSync(raw, { level: 9 })),
-    pngChunk("IEND", Buffer.alloc(0)),
-  ]);
+  return raw;
 }
 
 /** Finite codec-owned buffer reservations, not a process/RSS or GC guarantee. */
@@ -187,34 +246,54 @@ export function decodePng(data, options) {
     checkAbort(limits.signal);
     const filter = raw[y * (stride + 1)];
     if (filter > 4) throw new Error("Invalid PNG row filter");
-    const line = raw.subarray(y * (stride + 1) + 1, (y + 1) * (stride + 1));
-    for (let x = 0; x < stride; x++) {
-      const left = x >= channels ? pixels[y * stride + x - channels] : 0;
-      const up = y > 0 ? pixels[(y - 1) * stride + x] : 0;
-      const upLeft = y > 0 && x >= channels ? pixels[(y - 1) * stride + x - channels] : 0;
-      let value = line[x];
-      if (filter === 1) value += left;
-      else if (filter === 2) value += up;
-      else if (filter === 3) value += (left + up) >> 1;
-      else if (filter === 4) {
-        const p = left + up - upLeft;
-        const pa = Math.abs(p - left), pb = Math.abs(p - up), pc = Math.abs(p - upLeft);
-        value += pa <= pb && pa <= pc ? left : pb <= pc ? up : upLeft;
-      }
-      pixels[y * stride + x] = value & 0xff;
-    }
+    unfilterRow(filter, raw, y * (stride + 1) + 1, pixels, y * stride, stride, channels, y > 0);
   }
-  const rgba = Buffer.alloc(width * height * 4);
-  for (let i = 0; i < width * height; i++) {
-    const s = i * channels;
-    const grey = colourType === 0 || colourType === 4;
-    rgba[i * 4] = pixels[s];
-    rgba[i * 4 + 1] = grey ? pixels[s] : pixels[s + 1];
-    rgba[i * 4 + 2] = grey ? pixels[s] : pixels[s + 2];
-    rgba[i * 4 + 3] = channels === 2 ? pixels[s + 1] : channels === 4 ? pixels[s + 3] : 255;
-  }
+  // RGBA rows are already RGBA.
+  const rgba = colourType === 6 ? pixels : expandToRgba(pixels, width * height, colourType);
   checkAbort(limits.signal);
   return { width, height, rgba, colour, xmp, orientation: 1 };
+}
+
+/**
+ * One row's bytes from raw[s...] into pixels[o...], each filter in its own loop. With no row above, Up adds nothing
+ * and Paeth adds the left byte as Sub does; with no byte to the left, Paeth adds the byte above as Up does.
+ */
+function unfilterRow(filter, raw, s, pixels, o, stride, channels, hasUp) {
+  const u = o - stride;
+  // A Uint8Array keeps each sum's low byte, as & 0xff does.
+  if (filter === 0 || (filter === 2 && !hasUp)) pixels.set(raw.subarray(s, s + stride), o);
+  else if (filter === 1 || (filter === 4 && !hasUp)) {
+    for (let x = 0; x < channels; x++) pixels[o + x] = raw[s + x];
+    for (let x = channels; x < stride; x++) pixels[o + x] = raw[s + x] + pixels[o + x - channels];
+  } else if (filter === 2) {
+    for (let x = 0; x < stride; x++) pixels[o + x] = raw[s + x] + pixels[u + x];
+  } else if (filter === 3 && !hasUp) {
+    for (let x = 0; x < channels; x++) pixels[o + x] = raw[s + x];
+    for (let x = channels; x < stride; x++) pixels[o + x] = raw[s + x] + (pixels[o + x - channels] >> 1);
+  } else if (filter === 3) {
+    for (let x = 0; x < channels; x++) pixels[o + x] = raw[s + x] + (pixels[u + x] >> 1);
+    for (let x = channels; x < stride; x++) pixels[o + x] = raw[s + x] + ((pixels[o + x - channels] + pixels[u + x]) >> 1);
+  } else {
+    for (let x = 0; x < channels; x++) pixels[o + x] = raw[s + x] + pixels[u + x];
+    for (let x = channels; x < stride; x++) pixels[o + x] = raw[s + x] + paeth(pixels[o + x - channels], pixels[u + x], pixels[u + x - channels]);
+  }
+}
+
+/** RGBA from greyscale (colour type 0), greyscale with alpha (4) or RGB (2) pixels. */
+function expandToRgba(pixels, count, colourType) {
+  const rgba = Buffer.alloc(count * 4);
+  if (colourType === 2) {
+    for (let i = 0, s = 0, d = 0; i < count; i++, s += 3, d += 4) {
+      rgba[d] = pixels[s]; rgba[d + 1] = pixels[s + 1]; rgba[d + 2] = pixels[s + 2]; rgba[d + 3] = 255;
+    }
+  } else {
+    const alpha = colourType === 4;
+    for (let i = 0, s = 0, d = 0; i < count; i++, d += 4) {
+      const grey = pixels[s++];
+      rgba[d] = grey; rgba[d + 1] = grey; rgba[d + 2] = grey; rgba[d + 3] = alpha ? pixels[s++] : 255;
+    }
+  }
+  return rgba;
 }
 
 // ─── JPEG ──────────────────────────────────────────────────────────────
