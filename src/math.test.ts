@@ -40,6 +40,29 @@ describe("common image math and records", () => {
     const grey = resizeArea({ width: 25, height: 12, data: new Float32Array(25 * 12 * 3).fill(0.5) }, 11, 5);
     expect(grey.data.every(value => Math.abs(value - 0.5) < 1e-6)).toBe(true);
   });
+  it("gives a whole horizontal pass then a vertical one's float32 values, bit for bit, halvings included", () => {
+    const twoPass = ({ width, height, data }: { width: number; height: number; data: Float32Array }, outWidth: number, outHeight: number) => {
+      const horizontal = new Float32Array(outWidth * height * 3), out = new Float32Array(outWidth * outHeight * 3), sx = width / outWidth, sy = height / outHeight;
+      for (let x = 0; x < outWidth; x++) for (let px = Math.floor(x * sx); px < Math.min(Math.ceil((x + 1) * sx), width); px++) {
+        const weight = (Math.min((x + 1) * sx, px + 1) - Math.max(x * sx, px)) / sx;
+        for (let y = 0; y < height; y++) for (let c = 0; c < 3; c++) horizontal[(y * outWidth + x) * 3 + c] += data[(y * width + px) * 3 + c] * weight;
+      }
+      for (let y = 0; y < outHeight; y++) for (let py = Math.floor(y * sy); py < Math.min(Math.ceil((y + 1) * sy), height); py++) {
+        const weight = (Math.min((y + 1) * sy, py + 1) - Math.max(y * sy, py)) / sy;
+        for (let i = 0; i < outWidth * 3; i++) out[y * outWidth * 3 + i] += horizontal[py * outWidth * 3 + i] * weight;
+      }
+      return out;
+    };
+    for (const [width, height, outWidth, outHeight] of [[40, 22, 20, 11], [1062, 531, 531, 265], [25, 12, 11, 5], [37, 23, 10, 7], [9, 5, 13, 8], [7, 3, 7, 3], [6, 4, 0, 2]]) {
+      const data = new Float32Array(width * height * 3);
+      // Pairs of rows of float32 subnormals, where halving a value is not exact, among ordinary values and -0.
+      for (let index = 0; index < data.length; index++) {
+        data[index] = Math.floor(index / (width * 6)) % 3 === 1 ? (index * 7 % 5) * 2 ** -149 : index % 97 === 0 ? -0 : 2.5 * Math.sin(index * 12.9898) - 0.25;
+      }
+      const fast = resizeArea({ width, height, data }, outWidth, outHeight).data, plain = twoPass({ width, height, data }, outWidth, outHeight);
+      expect(new Uint32Array(fast.buffer), `${width}x${height} -> ${outWidth}x${outHeight}`).toEqual(new Uint32Array(plain.buffer));
+    }
+  });
   it("validates shared records and resolves safe source URLs without accepting spatial fields itself", () => {
     const checker = new ImageRecordChecker();
     const record = checkImageRepresentationBase(checker, { id: "preview", role: "preview", mimeType: "image/jpeg", encodedBytes: 100, extensions: { "owner.data": { value: true } } }, "$.image");
