@@ -39,6 +39,9 @@
  * - YCbCr becomes RGBA in one pass, with tables of the same products.
  * - jpeg-js's memory accounting is tallied, not enforced by allocation.
  * - Everything outside the sequential path is left to jpeg-js.
+ * - Comment segments are skipped, not turned into strings. jpeg-js passes
+ *   each comment byte as an argument to String.fromCharCode, which runs out
+ *   of stack on a long comment when called deep in a stack; this decodes it.
  */
 
 const ZIGZAG = Int32Array.from([

@@ -49,6 +49,8 @@
  * - Bits go through an accumulator into a growing byte array, not one call
  *   per bit into an Array.
  * - It reads RGB, so the caller need not expand it to RGBA first.
+ * - It can write 2^27 bytes or more. jpeg-js cannot: its Array of output
+ *   bytes stops growing there, with "RangeError: Invalid array length".
  */
 
 const ZIGZAG = Int32Array.from([
