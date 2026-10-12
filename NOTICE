@@ -3,3 +3,5 @@ FOSS Earth source code is licensed under GNU Affero General Public License versi
 The project may also offer separately negotiated commercial terms to copyright holders' customers. Those terms do not modify the AGPL grant.
 
 Third-party packages, map and terrain data, online services, and trademarks have their own notices and terms.
+
+node/jpegDecode.mjs and node/jpegEncode.mjs are derived from jpeg-js 0.4.4 (https://github.com/jpeg-js/jpeg-js), Copyright (c) 2014, Eugene Ware, under the BSD 3-Clause License in LICENSES/jpeg-js.txt. node/jpegDecode.mjs comes from its lib/decoder.js, Copyright 2011 notmasteryet, under the Apache License 2.0 in LICENSES/Apache-2.0.txt. node/jpegEncode.mjs comes from its lib/encoder.js, Andreas Ritter's JavaScript port of an encoder Copyright (c) 2008, Adobe Systems Incorporated, under the BSD 3-Clause License quoted in that file. Each file says how it was changed.

@@ -1,5 +1,7 @@
 import { deflateSync, inflateSync } from "node:zlib";
 import jpeg from "jpeg-js";
+import { decodeSequentialJpeg } from "./jpegDecode.mjs";
+import { encodeBaselineJpeg } from "./jpegEncode.mjs";
 import { readImageHeader } from "../dist/headers.js";
 export { srgbToLinear, linearToSrgb, toLinearImage, toSrgbImage, applyOrientation, colourIsSrgb, dropOpaqueAlpha } from "../dist/color.js";
 
@@ -124,8 +126,9 @@ function inspect(data, limits) {
     workingBytes = data.byteLength * 2 + (pixels * png.channels + header.height) * 2 + pixels * png.channels + rgbaBytes + 1024 * 1024 + (hasMetadata ? limits.maxMetadataBytes * 4 : 0);
     within(workingBytes, limits.maxMemoryBytes, "memory");
   } else {
-    // jpeg-js enforces the remaining tracked-allocation budget. Input copies,
-    // comments and metadata are charged separately; the reservation is conservative.
+    // jpeg-js's tracked-allocation budget (kept by jpegDecode.mjs, which
+    // tallies it, or by jpeg-js) gets the rest. Input copies, comments and
+    // metadata are charged separately; the reservation is conservative.
     const overhead = data.byteLength * 4 + limits.maxMetadataBytes * 4 + 1024 * 1024;
     workingBytes = Math.min(limits.maxMemoryBytes, overhead + pixels * 160 + rgbaBytes + 1024 * 1024);
     within(overhead + rgbaBytes, limits.maxMemoryBytes, "memory");
@@ -282,7 +285,9 @@ export function decodeJpeg(data, options) {
   const metadata = readJpegMetadata(data, limits);
   checkAbort(limits.signal);
   const overhead = data.byteLength * 4 + limits.maxMetadataBytes * 4 + 1024 * 1024;
-  const decoded = jpeg.decode(data, { useTArray: true, formatAsRGBA: true, maxMemoryUsageInMB: (plan.workingBytes - overhead) / (1024 * 1024), maxResolutionInMP: limits.maxPixels / 1000000 });
+  const jpegOptions = { useTArray: true, formatAsRGBA: true, maxMemoryUsageInMB: (plan.workingBytes - overhead) / (1024 * 1024), maxResolutionInMP: limits.maxPixels / 1000000 };
+  // jpegDecode.mjs returns jpeg-js's pixels, or null where jpeg-js decodes the file itself.
+  const decoded = decodeSequentialJpeg(data, jpegOptions) ?? jpeg.decode(data, jpegOptions);
   checkAbort(limits.signal);
   if (decoded.width !== plan.width || decoded.height !== plan.height) throw new Error("JPEG decoded dimensions differ from inspected header");
   return {
@@ -296,6 +301,9 @@ export function decodeJpeg(data, options) {
 }
 
 export function encodeJpeg({ width, height, rgb }, quality) {
+  // jpegEncode.mjs writes jpeg-js's bytes; other inputs keep jpeg-js's handling.
+  if (typeof quality === "number" && Number.isSafeInteger(width) && Number.isSafeInteger(height) && width >= 0 && height >= 0
+    && rgb instanceof Uint8Array && rgb.length >= width * height * 3) return encodeBaselineJpeg({ width, height, rgb }, quality);
   const rgba = Buffer.alloc(width * height * 4);
   for (let i = 0; i < width * height; i++) {
     rgba[i * 4] = rgb[i * 3];

@@ -108,7 +108,7 @@ Libraries are also developed through the app, which uses them straight from thei
 
 ## License
 
-AGPL-3.0-only. See [LICENSE](LICENSE) and [NOTICE](NOTICE). Third-party packages, map and terrain data, online services and trademarks have their own notices and terms.
+AGPL-3.0-only. See [LICENSE](LICENSE) and [NOTICE](NOTICE). The JPEG codec files in `node/` are derived from jpeg-js and keep its BSD 3-Clause and Apache 2.0 terms; see [NOTICE](NOTICE) and [LICENSES](LICENSES). Third-party packages, map and terrain data, online services and trademarks have their own notices and terms.
 
 ## Project policies
 
