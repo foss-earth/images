@@ -90,7 +90,7 @@ Version 1 ArrayBuffer rows are kept without migration or duplicate writes. A leg
 
 ## Node codecs
 
-The Node entry exports `sniffImage`, `readJpegMetadata`, `readGPano`, `decodeJpeg`, `decodePng`, `encodeJpeg`, `encodePng`, `applyOrientation`, `colourIsSrgb`, `dropOpaqueAlpha`, `cropImage`, `srgbToLinear`, `linearToSrgb`, `toLinearImage`, `toSrgbImage` and `resizeArea`. Orientation and colour normalization happen once, before preparation of a representation. The [equirectangular](https://github.com/foss-earth/equirectangular) package owns its source pyramid, sampler and cardinal fixture generator. [cubemap](https://github.com/foss-earth/cubemap) and [tiled-cubemap](https://github.com/foss-earth/tiled-cubemap) own face and gutter preparation.
+The Node entry exports `sniffImage`, `readJpegMetadata`, `readGPano`, `decodeJpeg`, `decodePng`, `encodeJpeg`, `encodePng`, `applyOrientation`, `colourIsSrgb`, `dropOpaqueAlpha`, `cropImage`, `srgbToLinear`, `linearToSrgb`, `toLinearImage`, `toSrgbImage` and `resizeArea`. Orientation and colour normalization happen once, before preparation of a representation. The [sphere-equirectangular](https://github.com/foss-earth/sphere-equirectangular) package owns its source pyramid, sampler and cardinal fixture generator. [sphere-cubemap](https://github.com/foss-earth/sphere-cubemap) and [sphere-tiled-cubemap](https://github.com/foss-earth/sphere-tiled-cubemap) own face and gutter preparation.
 
 ## Fixtures
 
