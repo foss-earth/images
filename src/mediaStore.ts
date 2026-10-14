@@ -9,7 +9,7 @@
  * its asset's revision never needs asking for again.
  *
  * Files are kept in IndexedDB in groups, one per representation of an asset
- * revision: an orb's preview cube, a panorama's tiles, a whole image. A group
+ * revision: an orb's preview cube, a sphere's tiles, a whole image. A group
  * is the unit that is counted, listed and dropped. Past `maxBytes` the groups
  * unused longest go first, whole; a new revision's files join a new group, and
  * the old one goes the same way.

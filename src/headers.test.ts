@@ -16,7 +16,7 @@ function withOrientation(jpeg: Uint8Array, orientation: number, little: boolean)
   return new Uint8Array([...jpeg.subarray(0, 2), ...segment, ...jpeg.subarray(2)]);
 }
 
-describe("panorama image headers", () => {
+describe("sphere image headers", () => {
   it("reads a prepared face's and a whole image's size without decoding them", () => {
     expect(readImageHeader(face)).toEqual({ kind: "image/jpeg", width: 64, height: 64, orientation: null });
     expect(readImageHeader(whole)).toMatchObject({ width: 1024, height: 512 });

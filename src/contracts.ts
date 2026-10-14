@@ -5,19 +5,45 @@ import type { ResourcePools } from "./pools.js";
 export type ImageExtensions = Readonly<Record<string, Readonly<Record<string, unknown>>>>;
 export interface ImageIdentity { id: string; revision: string }
 export interface ImageAttribution { text: string; license?: string; url?: string }
-export interface ImageRepresentation {
+/**
+ * What a representation is for. Spheres have a `preview` and an `immersion`
+ * representation; a rectangle photograph has one primary `image` representation.
+ */
+export type ImageRepresentationRole = "preview" | "immersion" | "image";
+/** The roles a sphere representation may have. Sphere validators accept only these. */
+export type SphereRepresentationRole = Extract<ImageRepresentationRole, "preview" | "immersion">;
+export const SPHERE_REPRESENTATION_ROLES: readonly SphereRepresentationRole[] = Object.freeze(["preview", "immersion"]);
+/** The common fields of any representation, spherical or rectangle. */
+export interface ImageRepresentationRecord<Role extends ImageRepresentationRole = ImageRepresentationRole> {
   id: string;
-  role: "preview" | "immersion";
+  role: Role;
   projection: string;
   mimeType: ImageKind;
   encodedBytes: number;
   extensions?: ImageExtensions;
 }
+/** A sphere representation, the record the sphere owners extend. */
+export type ImageRepresentation = ImageRepresentationRecord<SphereRepresentationRole>;
 export interface ImageAsset<R extends ImageRepresentation = ImageRepresentation> extends ImageIdentity {
   type: "panorama-image";
   colorSpace: "srgb";
   alpha: "opaque";
   attribution: ImageAttribution;
+  representations: readonly R[];
+  extensions?: ImageExtensions;
+}
+/** A rectangle photograph's primary representation; `@foss-earth/rectangle-image` owns its fields and validator. */
+export type RectangleRepresentationRecord = ImageRepresentationRecord<"image"> & { projection: "rectangle" };
+/**
+ * A rectangle photograph: one `image` representation in pixels of its own plane.
+ * Its validator lives with the rectangle representation, not with sphere assets,
+ * which keep requiring a cube preview.
+ */
+export interface RectangleImageAsset<R extends RectangleRepresentationRecord = RectangleRepresentationRecord> extends ImageIdentity {
+  type: "rectangle-image";
+  colorSpace: "srgb";
+  alpha: "opaque";
+  attribution?: ImageAttribution;
   representations: readonly R[];
   extensions?: ImageExtensions;
 }
@@ -33,7 +59,7 @@ export interface ImageEstimate {
 export type RepresentationValidation<R> =
   | { ok: true; representation: R; warnings: readonly ImageDiagnostic[] }
   | { ok: false; errors: readonly ImageDiagnostic[] };
-export interface RepresentationHooks<R extends ImageRepresentation = ImageRepresentation> {
+export interface RepresentationHooks<R extends ImageRepresentationRecord = ImageRepresentation> {
   readonly projection: string;
   validate(record: unknown, context: { path: string; baseUrl: string | null }): RepresentationValidation<R>;
   files(record: R): Iterable<ImageFile>;
@@ -41,7 +67,11 @@ export interface RepresentationHooks<R extends ImageRepresentation = ImageRepres
   filePath?(record: R, file: ImageFile, enumerationIndex: number): string;
   estimate(record: R, context: { maxTextureSide: number }): ImageEstimate;
 }
-/** Linear-light RGB. The caller applies source orientation once before sampling. */
+/**
+ * Linear-light RGB by direction, for spherical preparation. The caller applies
+ * source orientation once before sampling. A rectangle image samples by plane
+ * position through its own representation; it does not use this.
+ */
 export interface SourceSampler {
   sample(direction: readonly [number, number, number], footprintRadians: number, out: Float32Array | Float64Array | number[]): void;
 }

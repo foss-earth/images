@@ -72,4 +72,14 @@ describe("common image math and records", () => {
     expect(resolveImageUrl(checker, "https://user:secret@example.invalid/image.jpg", "$.url", null)).toBeNull();
     expect(checker.errors.at(-1)?.message).toBe("must not carry credentials");
   });
+  it("keeps sphere roles by default and admits the rectangle image role only when an owner names it", () => {
+    const rectangle = { id: "photo", role: "image", mimeType: "image/png", encodedBytes: 10 };
+    const sphere = new ImageRecordChecker();
+    expect(checkImageRepresentationBase(sphere, rectangle, "$.image")).toBeNull();
+    expect(sphere.errors).toEqual([{ path: "$.image.role", message: 'must be one of "preview", "immersion"' }]);
+    const owner = new ImageRecordChecker();
+    expect(checkImageRepresentationBase(owner, rectangle, "$.image", ["image"] as const)?.role).toBe("image");
+    expect(checkImageRepresentationBase(owner, { ...rectangle, role: "preview" }, "$.other", ["image"] as const)).toBeNull();
+    expect(owner.errors).toEqual([{ path: "$.other.role", message: 'must be one of "image"' }]);
+  });
 });

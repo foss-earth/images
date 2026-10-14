@@ -1,5 +1,5 @@
 /**
- * What a panorama file's own bytes say before it is decoded: its format by
+ * What a sphere file's own bytes say before it is decoded: its format by
  * signature, its pixel size from the header, and any EXIF orientation. The
  * loader checks these against the manifest's declarations (§2) so a decode
  * reservation rests on the header, not on an untrusted number, and so no

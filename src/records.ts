@@ -1,4 +1,4 @@
-import type { ImageDiagnostic, ImageExtensions, ImageRepresentation } from "./contracts.js";
+import { SPHERE_REPRESENTATION_ROLES, type ImageDiagnostic, type ImageExtensions, type ImageRepresentationRecord, type ImageRepresentationRole, type SphereRepresentationRole } from "./contracts.js";
 
 const ID = /^[A-Za-z0-9._-]+$/;
 /** An extension key names its owner: `owner.name`, lower-case owner. */
@@ -134,10 +134,15 @@ export function resolveImageUrl(checker: ImageRecordChecker, value: unknown, pat
   return url.href;
 }
 
-/** Common image fields only; owners validate their own keys and spatial fields. */
-export function checkImageRepresentationBase(checker: ImageRecordChecker, record: Record<string, unknown>, path: string): Omit<ImageRepresentation, "projection"> | null {
+/**
+ * Common image fields only; owners validate their own keys and spatial fields.
+ * Without `roles`, only the sphere roles pass: a rectangle owner names `["image"]`.
+ */
+export function checkImageRepresentationBase(checker: ImageRecordChecker, record: Record<string, unknown>, path: string): Omit<ImageRepresentationRecord<SphereRepresentationRole>, "projection"> | null;
+export function checkImageRepresentationBase<Role extends ImageRepresentationRole>(checker: ImageRecordChecker, record: Record<string, unknown>, path: string, roles: readonly Role[]): Omit<ImageRepresentationRecord<Role>, "projection"> | null;
+export function checkImageRepresentationBase(checker: ImageRecordChecker, record: Record<string, unknown>, path: string, roles: readonly ImageRepresentationRole[] = SPHERE_REPRESENTATION_ROLES): Omit<ImageRepresentationRecord, "projection"> | null {
   const id = checker.id(record.id, `${path}.id`);
-  const role = checker.oneOf(record.role, `${path}.role`, ["preview", "immersion"] as const);
+  const role = checker.oneOf(record.role, `${path}.role`, roles);
   const mimeType = checker.oneOf(record.mimeType, `${path}.mimeType`, MIME_TYPES);
   const encodedBytes = checker.positiveInteger(record.encodedBytes, `${path}.encodedBytes`);
   const extensions = checker.extensions(record.extensions, `${path}.extensions`);

@@ -155,8 +155,8 @@ const LOADING: readonly ParameterSpec[] = [
   }),
 ];
 
-/** One panorama's tiles as the tools prepare them, MiB: 510 tiles, 6.5 KB each at the finest level. */
-const TILED_PANORAMA_MIB = 3.3;
+/** One sphere's tiles as the tools prepare them, MiB: 510 tiles, 6.5 KB each at the finest level. */
+const TILED_SPHERE_MIB = 3.3;
 /** The saved images' default limit, MiB. */
 const SAVED_MIB = 256;
 
@@ -168,7 +168,7 @@ const SAVED: readonly ParameterSpec[] = [
   quantity({
     id: "scene.panorama.savedMiB", label: "Saved images", unit: "MiB", min: 0, max: 4096, fallback: SAVED_MIB, step: 1, section: "saved",
     description: "Disk space for the scene images the app keeps between visits: orb previews, tiles and whole images. Each file is kept under its image's revision, so it is downloaded once; a reload, a later visit and a look back at part of a 360 image read it from the disk. Past this, the images unused longest go first, whole. 0 keeps nothing.",
-    reason: `Room for the tiles of about ${Math.floor(SAVED_MIB / TILED_PANORAMA_MIB)} panoramas looked all around, ${TILED_PANORAMA_MIB} MiB each as the tools prepare them, with every orb's previews; only what was looked at is kept.`,
+    reason: `Room for the tiles of about ${Math.floor(SAVED_MIB / TILED_SPHERE_MIB)} panoramas looked all around, ${TILED_SPHERE_MIB} MiB each as the tools prepare them, with every orb's previews; only what was looked at is kept.`,
     source: "src/scenes/mediaStore.ts",
   }),
 ];

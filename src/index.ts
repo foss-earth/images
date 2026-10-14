@@ -1,5 +1,6 @@
 export * from "./contracts.js";
 export * from "./headers.js";
+export * from "./encodedFacts.js";
 export * from "./bytes.js";
 export * from "./pools.js";
 export * from "./session.js";

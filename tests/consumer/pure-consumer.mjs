@@ -13,6 +13,6 @@ if (entry === "root") {
   for (const name of ["createImageFileService", "fetchImageFile", "decodeImageFile", "readbackDecodedImage", "createCanvasRgbaSurface", "openIndexedDbBackend"]) assert.equal(typeof browser[name], "function");
 } else if (entry === "shaders") {
   const shaders = await import("@foss-earth/images/shaders");
-  for (const name of ["SRGB_ENCODE_WGSL", "SRGB_ENCODE_GLSL", "SRGB_DECODE_GLSL"]) assert.match(shaders[name], /panoramaSrgb/);
+  for (const name of ["SRGB_ENCODE_WGSL", "SRGB_ENCODE_GLSL", "SRGB_DECODE_GLSL"]) assert.match(shaders[name], /sphereSrgb/);
 } else assert.fail("Unknown pure entry fixture.");
 console.log(`Installed pure ${entry} imports without DOM, codec/UI/feature peers or device initialization.`);
